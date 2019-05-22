@@ -2,9 +2,9 @@
 #include "ClipperUtils.hpp"
 #include "Geometry.hpp"
 #include "Tesselate.hpp"
-#include "qhull/src/libqhullcpp/Qhull.h"
-#include "qhull/src/libqhullcpp/QhullFacetList.h"
-#include "qhull/src/libqhullcpp/QhullVertexSet.h"
+#include <libqhullcpp/Qhull.h>
+#include <libqhullcpp/QhullFacetList.h>
+#include <libqhullcpp/QhullVertexSet.h>
 #include <cmath>
 #include <deque>
 #include <queue>
@@ -328,6 +328,17 @@ void TriangleMesh::transform(const Transform3d& t, bool fix_left_handed)
 		this->repair();
 		stl_reverse_all_facets(&stl);
 	}
+}
+
+void TriangleMesh::transform(const Matrix3d& m, bool fix_left_handed)
+{
+    stl_transform(&stl, m);
+    stl_invalidate_shared_vertices(&stl);
+    if (fix_left_handed && m.determinant() < 0.) {
+        // Left handed transformation is being applied. It is a good idea to flip the faces and their normals.
+        this->repair();
+        stl_reverse_all_facets(&stl);
+    }
 }
 
 void TriangleMesh::align_to_origin()

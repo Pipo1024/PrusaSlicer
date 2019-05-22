@@ -38,12 +38,13 @@ namespace GUI {
 wxDEFINE_EVENT(EVT_TAB_VALUE_CHANGED, wxCommandEvent);
 wxDEFINE_EVENT(EVT_TAB_PRESETS_CHANGED, SimpleEvent);
 
-Tab::Tab(wxNotebook* parent, const wxString& title, const char* name) : 
-	m_parent(parent), m_title(title), m_name(name)
+// Tab::Tab(wxNotebook* parent, const wxString& title, const char* name) : 
+// 	m_parent(parent), m_title(title), m_name(name)
+Tab::Tab(wxNotebook* parent, const wxString& title, Preset::Type type) :
+	m_parent(parent), m_title(title), m_type(type)
 {
-	Create(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxBK_LEFT | wxTAB_TRAVERSAL, name);
+	Create(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxBK_LEFT | wxTAB_TRAVERSAL/*, name*/);
 	this->SetFont(Slic3r::GUI::wxGetApp().normal_font());
-    set_type();
 
 	m_compatible_printers.type			= Preset::TYPE_PRINTER;
 	m_compatible_printers.key_list		= "compatible_printers";
@@ -128,7 +129,8 @@ void Tab::create_preset_tab()
 
     add_scaled_button(panel, &m_btn_hide_incompatible_presets, m_bmp_hide_incompatible_presets.name());
 
-	m_btn_save_preset->SetToolTip(_(L("Save current ")) + m_title);
+    // TRN "Save current Settings"
+	m_btn_save_preset->SetToolTip(wxString::Format(_(L("Save current %s")),m_title));
 	m_btn_delete_preset->SetToolTip(_(L("Delete this preset")));
 	m_btn_delete_preset->Disable();
 
@@ -157,7 +159,7 @@ void Tab::create_preset_tab()
 	m_undo_to_sys_btn->Bind(wxEVT_BUTTON, ([this](wxCommandEvent) { on_roll_back_value(true); }));
 	m_question_btn->Bind(wxEVT_BUTTON, ([this](wxCommandEvent)
 	{
-		auto dlg = new ButtonsDescription(this, &m_icon_descriptions);
+		auto dlg = new ButtonsDescription(this, m_icon_descriptions);
 		if (dlg->ShowModal() == wxID_OK) {
 			// Colors for ui "decoration"
             for (Tab *tab : wxGetApp().tabs_list) {
@@ -176,7 +178,7 @@ void Tab::create_preset_tab()
     // Sizer with buttons for mode changing
     m_mode_sizer = new ModeSizer(panel);
 
-    const float scale_factor = wxGetApp().em_unit()*0.1;// GetContentScaleFactor();
+    const float scale_factor = /*wxGetApp().*/em_unit(this)*0.1;// GetContentScaleFactor();
 	m_hsizer = new wxBoxSizer(wxHORIZONTAL);
 	sizer->Add(m_hsizer, 0, wxEXPAND | wxBOTTOM, 3);
 	m_hsizer->Add(m_presets_choice, 0, wxLEFT | wxRIGHT | wxTOP | wxALIGN_CENTER_VERTICAL, 3);
@@ -210,7 +212,8 @@ void Tab::create_preset_tab()
     m_treectrl = new wxTreeCtrl(panel, wxID_ANY, wxDefaultPosition, wxSize(20 * m_em_unit, -1),
 		wxTR_NO_BUTTONS | wxTR_HIDE_ROOT | wxTR_SINGLE | wxTR_NO_LINES | wxBORDER_SUNKEN | wxWANTS_CHARS);
 	m_left_sizer->Add(m_treectrl, 1, wxEXPAND);
-    m_icons = new wxImageList(int(16 * scale_factor), int(16 * scale_factor), true, 1);
+    const int img_sz = int(16 * scale_factor + 0.5f);
+    m_icons = new wxImageList(img_sz, img_sz, true, 1);
 	// Index of the last icon inserted into $self->{icons}.
 	m_icon_count = -1;
 	m_treectrl->AssignImageList(m_icons);
@@ -253,7 +256,7 @@ void Tab::create_preset_tab()
     // Fill cache for mode bitmaps
     m_mode_bitmap_cache.reserve(3);
     m_mode_bitmap_cache.push_back(ScalableBitmap(this, "mode_simple_.png"));
-    m_mode_bitmap_cache.push_back(ScalableBitmap(this, "mode_middle_.png"));
+    m_mode_bitmap_cache.push_back(ScalableBitmap(this, "mode_advanced_.png"));
     m_mode_bitmap_cache.push_back(ScalableBitmap(this, "mode_expert_.png"));
 
 	// Initialize the DynamicPrintConfig by default keys/values.
@@ -283,9 +286,10 @@ void Tab::add_scaled_bitmap(wxWindow* parent,
 void Tab::load_initial_data()
 {
 	m_config = &m_presets->get_edited_preset().config;
-	m_bmp_non_system = m_presets->get_selected_preset_parent() ? &m_bmp_value_unlock : &m_bmp_white_bullet;
-	m_ttg_non_system = m_presets->get_selected_preset_parent() ? &m_ttg_value_unlock : &m_ttg_white_bullet_ns;
-	m_tt_non_system = m_presets->get_selected_preset_parent() ? &m_tt_value_unlock : &m_ttg_white_bullet_ns;
+	bool has_parent = m_presets->get_selected_preset_parent() != nullptr;
+	m_bmp_non_system = has_parent ? &m_bmp_value_unlock : &m_bmp_white_bullet;
+	m_ttg_non_system = has_parent ? &m_ttg_value_unlock : &m_ttg_white_bullet_ns;
+	m_tt_non_system  = has_parent ? &m_tt_value_unlock  : &m_ttg_white_bullet_ns;
 }
 
 Slic3r::GUI::PageShp Tab::add_options_page(const wxString& title, const std::string& icon, bool is_extruder_pages /*= false*/)
@@ -463,7 +467,8 @@ void Tab::update_changed_ui()
 //	Thaw();
 
 	wxTheApp->CallAfter([this]() {
-		update_changed_tree_ui();
+        if (parent()) //To avoid a crash, parent should be exist for a moment of a tree updating
+		    update_changed_tree_ui();
 	});
 }
 
@@ -816,6 +821,19 @@ void Tab::load_key_value(const std::string& opt_key, const boost::any& value, bo
 	update();
 }
 
+static wxString support_combo_value_for_config(const DynamicPrintConfig &config, bool is_fff)
+{
+    const std::string support         = is_fff ? "support_material"                 : "supports_enable";
+    const std::string buildplate_only = is_fff ? "support_material_buildplate_only" : "support_buildplate_only";
+	return
+		! config.opt_bool(support) ?
+        	_("None") :
+			(is_fff && !config.opt_bool("support_material_auto")) ?
+				_("For support enforcers only") :
+                (config.opt_bool(buildplate_only) ? _("Support on build plate only") :
+				                                    _("Everywhere"));
+}
+
 void Tab::on_value_change(const std::string& opt_key, const boost::any& value)
 {
 	if (wxGetApp().plater() == nullptr) {
@@ -823,23 +841,17 @@ void Tab::on_value_change(const std::string& opt_key, const boost::any& value)
 	}
 
     const bool is_fff = supports_printer_technology(ptFFF);
-    ConfigOptionsGroup* og_freq_chng_params = wxGetApp().sidebar().og_freq_chng_params(is_fff);
+	ConfigOptionsGroup* og_freq_chng_params = wxGetApp().sidebar().og_freq_chng_params(is_fff);
     if (opt_key == "fill_density" || opt_key == "pad_enable")
 	{
         boost::any val = og_freq_chng_params->get_config_value(*m_config, opt_key);
         og_freq_chng_params->set_value(opt_key, val);
 	}
 
-	if ( is_fff && (opt_key == "support_material" || opt_key == "support_material_buildplate_only") || 
-        !is_fff && (opt_key == "supports_enable"  || opt_key == "support_buildplate_only"))
-	{
-        const std::string support         = is_fff ? "support_material"                 : "supports_enable";
-        const std::string buildplate_only = is_fff ? "support_material_buildplate_only" : "support_buildplate_only";
-        wxString new_selection = !m_config->opt_bool(support)         ? _("None") :
-                                  m_config->opt_bool(buildplate_only) ? _("Support on build plate only") :
-									                                    _("Everywhere");
-        og_freq_chng_params->set_value("support", new_selection);
-	}
+	if (is_fff ?
+			(opt_key == "support_material" || opt_key == "support_material_auto" || opt_key == "support_material_buildplate_only") :
+        	(opt_key == "supports_enable"  || opt_key == "support_buildplate_only"))
+		og_freq_chng_params->set_value("support", support_combo_value_for_config(*m_config, is_fff));
 
 	if (opt_key == "brim_width")
 	{
@@ -907,13 +919,13 @@ void Tab::update_preset_description_line()
 	wxString description_line = preset.is_default ?
 		_(L("It's a default preset.")) : preset.is_system ?
 		_(L("It's a system preset.")) : 
-		_(L("Current preset is inherited from ")) + (parent == nullptr ? 
-													"default preset." : 
-													":\n\t" + parent->name);
+		wxString::Format(_(L("Current preset is inherited from %s")), (parent == nullptr ? 
+													_(L("default preset"))+"." : 
+													":\n\t" + parent->name));
 	
 	if (preset.is_default || preset.is_system)
-		description_line += "\n\t" + _(L("It can't be deleted or modified. ")) + 
-							"\n\t" + _(L("Any modifications should be saved as a new preset inherited from this one. ")) + 
+		description_line += "\n\t" + _(L("It can't be deleted or modified.")) + 
+							"\n\t" + _(L("Any modifications should be saved as a new preset inherited from this one.")) + 
 							"\n\t" + _(L("To do that please specify a new name for the preset."));
 	
 	if (parent && parent->vendor)
@@ -965,18 +977,11 @@ void Tab::update_preset_description_line()
 
 void Tab::update_frequently_changed_parameters()
 {
-    auto og_freq_chng_params = wxGetApp().sidebar().og_freq_chng_params(supports_printer_technology(ptFFF));
+	const bool is_fff = supports_printer_technology(ptFFF);
+	auto og_freq_chng_params = wxGetApp().sidebar().og_freq_chng_params(is_fff);
     if (!og_freq_chng_params) return;
 
-    const bool is_fff = supports_printer_technology(ptFFF);
-
-    const std::string support           = is_fff ? "support_material"                   : "supports_enable";
-    const std::string buildplate_only   = is_fff ? "support_material_buildplate_only"   : "support_buildplate_only";
-
-    wxString new_selection = !m_config->opt_bool(support)         ? _("None") :
-                              m_config->opt_bool(buildplate_only) ? _("Support on build plate only") :
-                                                                    _("Everywhere");
-    og_freq_chng_params->set_value("support", new_selection);
+	og_freq_chng_params->set_value("support", support_combo_value_for_config(*m_config, is_fff));
 
     const std::string updated_value_key = is_fff ? "fill_density" : "pad_enable";
 
@@ -1230,15 +1235,40 @@ void TabPrint::update()
         return; // ys_FIXME
 
     // #ys_FIXME_to_delete
-    //! Temporary workaround for the correct updates of the SpinCtrl (like "perimeters"):
+    //! Temporary workaround for the correct updates of the TextCtrl (like "layer_height"):
     // KillFocus() for the wxSpinCtrl use CallAfter function. So,
     // to except the duplicate call of the update() after dialog->ShowModal(),
     // let check if this process is already started.
-//     if (is_msg_dlg_already_exist)    // ! It looks like a fixed problem after start to using of a m_dirty_options
-//         return;                      // ! TODO Let delete this part of code after a common aplication testing
+    if (is_msg_dlg_already_exist)
+        return;
 
     m_update_cnt++;
 //	Freeze();
+
+    // layer_height shouldn't be equal to zero
+    if (m_config->opt_float("layer_height") < EPSILON)
+    {
+        const wxString msg_text = _(L("Zero layer height is not valid.\n\nThe layer height will be reset to 0.01."));
+        auto dialog = new wxMessageDialog(parent(), msg_text, _(L("Layer height")), wxICON_WARNING | wxOK);
+        DynamicPrintConfig new_conf = *m_config;
+        is_msg_dlg_already_exist = true;
+        dialog->ShowModal();
+        new_conf.set_key_value("layer_height", new ConfigOptionFloat(0.01));
+        load_config(new_conf);
+        is_msg_dlg_already_exist = false;
+    }
+
+    if (fabs(m_config->option<ConfigOptionFloatOrPercent>("first_layer_height")->value - 0) < EPSILON)
+    {
+        const wxString msg_text = _(L("Zero first layer height is not valid.\n\nThe first layer height will be reset to 0.01."));
+        auto dialog = new wxMessageDialog(parent(), msg_text, _(L("First layer height")), wxICON_WARNING | wxOK);
+        DynamicPrintConfig new_conf = *m_config;
+        is_msg_dlg_already_exist = true;
+        dialog->ShowModal();
+        new_conf.set_key_value("first_layer_height", new ConfigOptionFloatOrPercent(0.01, false));
+        load_config(new_conf);
+        is_msg_dlg_already_exist = false;
+    }
 
 	double fill_density = m_config->option<ConfigOptionPercent>("fill_density")->value;
 
@@ -1253,7 +1283,6 @@ void TabPrint::update()
 			"- no ensure_vertical_shell_thickness\n"
 			"\nShall I adjust those settings in order to enable Spiral Vase?"));
 		auto dialog = new wxMessageDialog(parent(), msg_text, _(L("Spiral Vase")), wxICON_WARNING | wxYES | wxNO);
-//         is_msg_dlg_already_exist = true;
 		DynamicPrintConfig new_conf = *m_config;
 		if (dialog->ShowModal() == wxID_YES) {
 			new_conf.set_key_value("perimeters", new ConfigOptionInt(1));
@@ -1269,7 +1298,6 @@ void TabPrint::update()
 		}
 		load_config(new_conf);
 		on_value_change("fill_density", fill_density);
-//         is_msg_dlg_already_exist = false;
 	}
 
 	if (m_config->opt_bool("wipe_tower") && m_config->opt_bool("support_material") &&
@@ -1354,10 +1382,10 @@ void TabPrint::update()
 					correct_100p_fill = true;
 			}
 			// get fill_pattern name from enum_labels for using this one at dialog_msg
-			str_fill_pattern = m_config->def()->get("fill_pattern")->enum_labels[fill_pattern];
+			str_fill_pattern = _utf8(m_config->def()->get("fill_pattern")->enum_labels[fill_pattern]);
 			if (!correct_100p_fill) {
-				wxString msg_text = _(L("The ")) + str_fill_pattern + _(L(" infill pattern is not supposed to work at 100% density.\n"
-					"\nShall I switch to rectilinear fill pattern?"));
+				wxString msg_text = GUI::from_u8((boost::format(_utf8(L("The %1% infill pattern is not supposed to work at 100%% density.\n\n"
+					                                           "Shall I switch to rectilinear fill pattern?"))) % str_fill_pattern).str());
 				auto dialog = new wxMessageDialog(parent(), msg_text, _(L("Infill")), wxICON_WARNING | wxYES | wxNO);
 				DynamicPrintConfig new_conf = *m_config;
 				if (dialog->ShowModal() == wxID_YES) {
@@ -1448,6 +1476,7 @@ void TabPrint::update()
 
 	m_recommended_thin_wall_thickness_description_line->SetText(
 		from_u8(PresetHints::recommended_thin_wall_thickness(*m_preset_bundle)));
+    Layout();
 
 //	Thaw();
     m_update_cnt--;
@@ -1476,7 +1505,7 @@ void TabFilament::build()
 		optgroup->append_single_option_line("filament_density");
 		optgroup->append_single_option_line("filament_cost");
 
-		optgroup = page->new_optgroup(_(L("Temperature ")) + wxString("°C", wxConvUTF8));
+		optgroup = page->new_optgroup(_(L("Temperature")) + wxString(" °C", wxConvUTF8));
 		Line line = { _(L("Extruder")), "" };
 		line.append_option(optgroup->get_option("first_layer_temperature"));
 		line.append_option(optgroup->get_option("temperature"));
@@ -1630,6 +1659,7 @@ void TabFilament::update()
 	m_cooling_description_line->SetText(text);
 	text = from_u8(PresetHints::maximum_volumetric_flow_description(*m_preset_bundle));
 	m_volumetric_speed_description_line->SetText(text);
+    Layout();
 
 	bool cooling = m_config->opt_bool("cooling", 0);
 	bool fan_always_on = cooling || m_config->opt_bool("fan_always_on", 0);
@@ -1735,7 +1765,7 @@ void TabPrinter::build_printhost(ConfigOptionsGroup *optgroup)
 		Line cafile_line = optgroup->create_single_option_line("printhost_cafile");
 
 		auto printhost_cafile_browse = [this, optgroup] (wxWindow* parent) {
-			auto btn = new wxButton(parent, wxID_ANY, _(L(" Browse "))+dots, wxDefaultPosition, wxDefaultSize, wxBU_LEFT);
+			auto btn = new wxButton(parent, wxID_ANY, " " + _(L("Browse"))+" " +dots, wxDefaultPosition, wxDefaultSize, wxBU_LEFT);
 			btn->SetFont(Slic3r::GUI::wxGetApp().normal_font());
 			btn->SetBitmap(create_scaled_bitmap(this, "browse"));
 			auto sizer = new wxBoxSizer(wxHORIZONTAL);
@@ -1816,7 +1846,7 @@ void TabPrinter::build_fff()
         Line line = optgroup->create_single_option_line("bed_shape");//{ _(L("Bed shape")), "" };
 		line.widget = [this](wxWindow* parent) {
             ScalableButton* btn;
-            add_scaled_button(parent, &btn, "printer_white", _(L(" Set ")) + dots, wxBU_LEFT | wxBU_EXACTFIT);
+            add_scaled_button(parent, &btn, "printer_white",  " " + _(L("Set")) + " " + dots, wxBU_LEFT | wxBU_EXACTFIT);
             btn->SetFont(wxGetApp().normal_font());
 
 			auto sizer = new wxBoxSizer(wxHORIZONTAL);
@@ -1841,7 +1871,7 @@ void TabPrinter::build_fff()
 		optgroup = page->new_optgroup(_(L("Capabilities")));
 		ConfigOptionDef def;
 			def.type =  coInt,
-			def.default_value = new ConfigOptionInt(1); 
+			def.set_default_value(new ConfigOptionInt(1)); 
 			def.label = L("Extruders");
 			def.tooltip = L("Number of extruders of the printer.");
 			def.min = 1;
@@ -2017,7 +2047,7 @@ void TabPrinter::build_sla()
     Line line = optgroup->create_single_option_line("bed_shape");//{ _(L("Bed shape")), "" };
     line.widget = [this](wxWindow* parent) {
         ScalableButton* btn;
-        add_scaled_button(parent, &btn, "printer_white", _(L(" Set ")) + dots, wxBU_LEFT | wxBU_EXACTFIT);
+        add_scaled_button(parent, &btn, "printer_white", " " + _(L("Set")) + " " + dots, wxBU_LEFT | wxBU_EXACTFIT);
         btn->SetFont(wxGetApp().normal_font());
 
 
@@ -2125,7 +2155,7 @@ void TabPrinter::extruders_count_changed(size_t extruders_count)
 void TabPrinter::append_option_line(ConfigOptionsGroupShp optgroup, const std::string opt_key)
 {
 	auto option = optgroup->get_option(opt_key, 0);
-	auto line = Line{ option.opt.full_label, "" };
+	auto line = Line{ _(option.opt.full_label), "" };
 	line.append_option(option);
 	if (m_use_silent_mode)
 		line.append_option(optgroup->get_option(opt_key, 1));
@@ -2148,14 +2178,14 @@ PageShp TabPrinter::build_kinematics_page()
 		def.width = 15;
 		def.gui_type = "legend";
         def.mode = comAdvanced;
-		def.tooltip = L("Values in this column are for Full Power mode");
-		def.default_value = new ConfigOptionString{ L("Full Power") };
+		def.tooltip = L("Values in this column are for Normal mode");
+		def.set_default_value(new ConfigOptionString{ _(L("Normal")).ToUTF8().data() });
 
 		auto option = Option(def, "full_power_legend");
 		line.append_option(option);
 
-		def.tooltip = L("Values in this column are for Silent mode");
-		def.default_value = new ConfigOptionString{ L("Silent") };
+		def.tooltip = L("Values in this column are for Stealth mode");
+		def.set_default_value(new ConfigOptionString{ _(L("Stealth")).ToUTF8().data() });
 		option = Option(def, "silent_legend");
 		line.append_option(option);
 
@@ -2333,7 +2363,21 @@ void TabPrinter::update_pages()
     // set m_pages_(technology after changing) to m_pages
     // m_printer_technology will be set by Tab::load_current_preset()
     if (new_printer_technology == ptFFF)
-        m_pages_fff.empty() ? build_fff() : m_pages.swap(m_pages_fff);
+    {
+        if (m_pages_fff.empty())
+        {
+            build_fff();
+            if (m_extruders_count > 1)
+            {
+                m_preset_bundle->update_multi_material_filament_presets();
+                on_value_change("extruders_count", m_extruders_count);
+            }
+        }
+        else
+            m_pages.swap(m_pages_fff);
+
+         wxGetApp().sidebar().update_objects_list_extruder_column(m_extruders_count);
+    }
     else 
         m_pages_sla.empty() ? build_sla() : m_pages.swap(m_pages_sla);
 
@@ -2755,8 +2799,8 @@ bool Tab::may_discard_current_dirty_preset(PresetCollection* presets /*= nullptr
 	std::string   type_name  = presets->name();
 	wxString      tab        = "          ";
 	wxString      name       = old_preset.is_default ?
-		wxString::Format(_(L("Default preset (%s)")), _(type_name)) :                       //_(L("Default ")) + type_name + _(L(" preset")) :                
-		wxString::Format(_(L("Preset (%s)")), _(type_name)) + "\n" + tab + old_preset.name; //type_name + _(L(" preset\n")) + tab + old_preset.name;
+		wxString::Format(_(L("Default preset (%s)")), _(type_name)) :
+		wxString::Format(_(L("Preset (%s)")), _(type_name)) + "\n" + tab + old_preset.name;
 
 	// Collect descriptions of the dirty options.
 	wxString changes;
@@ -2807,7 +2851,7 @@ void Tab::OnTreeSelChange(wxTreeEvent& event)
 	if (m_disable_tree_sel_changed_event)         
         return;
 
-// There is a bug related to Ubuntu overlay scrollbars, see https://github.com/prusa3d/Slic3r/issues/898 and https://github.com/prusa3d/Slic3r/issues/952.
+// There is a bug related to Ubuntu overlay scrollbars, see https://github.com/prusa3d/PrusaSlicer/issues/898 and https://github.com/prusa3d/PrusaSlicer/issues/952.
 // The issue apparently manifests when Show()ing a window with overlay scrollbars while the UI is frozen. For this reason,
 // we will Thaw the UI prematurely on Linux. This means destroing the no_updates object prematurely.
 #ifdef __linux__	
@@ -2873,11 +2917,10 @@ void Tab::save_preset(std::string name /*= ""*/)
 
 	if (name.empty()) {
 		const Preset &preset = m_presets->get_selected_preset();
-		auto default_name = preset.is_default ? "Untitled" : preset.name;
-		if (preset.is_system) {
-			default_name += " - ";
-			default_name += _(L("Copy")).ToUTF8().data();
-		}
+        auto default_name = preset.is_default ? "Untitled" :
+                            preset.is_system ? (boost::format(_utf8(L("%1% - Copy"))) % preset.name).str() : 
+	                        preset.name;
+
  		bool have_extention = boost::iends_with(default_name, ".ini");
 		if (have_extention) {
 			size_t len = default_name.length()-4;
@@ -2933,10 +2976,12 @@ void Tab::delete_preset()
 {
 	auto current_preset = m_presets->get_selected_preset();
 	// Don't let the user delete the ' - default - ' configuration.
-	wxString action = current_preset.is_external ? _(L("remove")) : _(L("delete"));
-	wxString msg = _(L("Are you sure you want to ")) + action + _(L(" the selected preset?"));
-	action = current_preset.is_external ? _(L("Remove")) : _(L("Delete"));
-	wxString title = action + _(L(" Preset"));
+    std::string action = current_preset.is_external ? _utf8(L("remove")) : _utf8(L("delete"));
+    // TRN  remove/delete
+    const wxString msg = from_u8((boost::format(_utf8(L("Are you sure you want to %1% the selected preset?"))) % action).str());
+	action = current_preset.is_external ? _utf8(L("Remove")) : _utf8(L("Delete"));
+	// TRN  Remove/Delete
+    wxString title = from_u8((boost::format(_utf8(L("%1% Preset"))) % action).str());  //action + _(L(" Preset"));
 	if (current_preset.is_default ||
 		wxID_YES != wxMessageDialog(parent(), msg, title, wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION).ShowModal())
 		return;
@@ -2986,7 +3031,7 @@ wxSizer* Tab::compatible_widget_create(wxWindow* parent, PresetDependencies &dep
 {
 	deps.checkbox = new wxCheckBox(parent, wxID_ANY, _(L("All")));
 	deps.checkbox->SetFont(Slic3r::GUI::wxGetApp().normal_font());
-    add_scaled_button(parent, &deps.btn, "printer_white", _(L(" Set ")) + dots, wxBU_LEFT | wxBU_EXACTFIT);
+    add_scaled_button(parent, &deps.btn, "printer_white", wxString::Format(" %s %s", _(L("Set")), dots), wxBU_LEFT | wxBU_EXACTFIT);
     deps.btn->SetFont(Slic3r::GUI::wxGetApp().normal_font());
 
 	auto sizer = new wxBoxSizer(wxHORIZONTAL);
@@ -3062,24 +3107,28 @@ void Tab::compatible_widget_reload(PresetDependencies &deps)
 
 void Tab::fill_icon_descriptions()
 {
-	m_icon_descriptions.push_back(t_icon_description(&m_bmp_value_lock, L("LOCKED LOCK;"
-		"indicates that the settings are the same as the system values for the current option group")));
+	m_icon_descriptions.emplace_back(&m_bmp_value_lock, L("LOCKED LOCK"),
+        // TRN Description for "LOCKED LOCK"
+		L("indicates that the settings are the same as the system values for the current option group"));
 
-	m_icon_descriptions.push_back(t_icon_description(&m_bmp_value_unlock, L("UNLOCKED LOCK;"
-		"indicates that some settings were changed and are not equal to the system values for "
+    m_icon_descriptions.emplace_back(&m_bmp_value_unlock, L("UNLOCKED LOCK"),
+        // TRN Description for "UNLOCKED LOCK"
+		L("indicates that some settings were changed and are not equal to the system values for "
 		"the current option group.\n"
 		"Click the UNLOCKED LOCK icon to reset all settings for current option group to "
-		"the system values.")));
+		"the system values."));
 
-	m_icon_descriptions.push_back(t_icon_description(&m_bmp_white_bullet, L("WHITE BULLET;"
-		"for the left button: \tindicates a non-system preset,\n"
-		"for the right button: \tindicates that the settings hasn't been modified.")));
+    m_icon_descriptions.emplace_back(&m_bmp_white_bullet, L("WHITE BULLET"),
+        // TRN Description for "WHITE BULLET"
+        L("for the left button: \tindicates a non-system preset,\n"
+		"for the right button: \tindicates that the settings hasn't been modified."));
 
-	m_icon_descriptions.push_back(t_icon_description(&m_bmp_value_revert, L("BACK ARROW;"
-		"indicates that the settings were changed and are not equal to the last saved preset for "
+    m_icon_descriptions.emplace_back(&m_bmp_value_revert, L("BACK ARROW"),
+        // TRN Description for "BACK ARROW"
+        L("indicates that the settings were changed and are not equal to the last saved preset for "
 		"the current option group.\n"
 		"Click the BACK ARROW icon to reset all settings for the current option group to "
-		"the last saved preset.")));
+		"the last saved preset."));
 }
 
 void Tab::set_tooltips_text()
@@ -3237,7 +3286,8 @@ ConfigOptionsGroupShp Page::new_optgroup(const wxString& title, int noncommon_la
 
 void SavePresetWindow::build(const wxString& title, const std::string& default_name, std::vector<std::string> &values)
 {
-	auto text = new wxStaticText(this, wxID_ANY, _(L("Save ")) + title + _(L(" as:")), 
+    // TRN Preset
+	auto text = new wxStaticText(this, wxID_ANY, wxString::Format(_(L("Save %s as:")), title), 
 									wxDefaultPosition, wxDefaultSize);
 	m_combo = new wxComboBox(this, wxID_ANY, from_u8(default_name), 
 							wxDefaultPosition, wxDefaultSize, 0, 0, wxTE_PROCESS_ENTER);
@@ -3262,27 +3312,27 @@ void SavePresetWindow::accept()
 {
 	m_chosen_name = normalize_utf8_nfc(m_combo->GetValue().ToUTF8());
 	if (!m_chosen_name.empty()) {
-		const char* unusable_symbols = "<>:/\\|?*\"";
+		const char* unusable_symbols = "<>[]:/\\|?*\"";
 		bool is_unusable_symbol = false;
-		bool is_unusable_postfix = false;
-		const std::string unusable_postfix = PresetCollection::get_suffix_modified();//"(modified)";
+		bool is_unusable_suffix = false;
+		const std::string unusable_suffix = PresetCollection::get_suffix_modified();//"(modified)";
 		for (size_t i = 0; i < std::strlen(unusable_symbols); i++) {
 			if (m_chosen_name.find_first_of(unusable_symbols[i]) != std::string::npos) {
 				is_unusable_symbol = true;
 				break;
 			}
 		}
-		if (m_chosen_name.find(unusable_postfix) != std::string::npos)
-			is_unusable_postfix = true;
+		if (m_chosen_name.find(unusable_suffix) != std::string::npos)
+			is_unusable_suffix = true;
 
 		if (is_unusable_symbol) {
 			show_error(this,_(L("The supplied name is not valid;")) + "\n" +
-							_(L("the following characters are not allowed:")) + " <>:/\\|?*\"");
+							_(L("the following characters are not allowed:")) + " " + unusable_symbols);
 		}
-		else if (is_unusable_postfix) {
+		else if (is_unusable_suffix) {
 			show_error(this,_(L("The supplied name is not valid;")) + "\n" +
-							_(L("the following postfix are not allowed:")) + "\n\t" + //unusable_postfix);
-							wxString::FromUTF8(unusable_postfix.c_str()));
+							_(L("the following suffix is not allowed:")) + "\n\t" +
+							wxString::FromUTF8(unusable_suffix.c_str()));
 		}
 		else if (m_chosen_name == "- default -") {
 			show_error(this, _(L("The supplied name is not available.")));

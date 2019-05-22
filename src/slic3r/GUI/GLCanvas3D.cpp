@@ -16,6 +16,7 @@
 #include "slic3r/GUI/GLShader.hpp"
 #include "slic3r/GUI/GUI.hpp"
 #include "slic3r/GUI/PresetBundle.hpp"
+#include "slic3r/GUI/Tab.hpp"
 #include "GUI_App.hpp"
 #include "GUI_ObjectList.hpp"
 #include "GUI_ObjectManipulation.hpp"
@@ -716,12 +717,13 @@ void GLCanvas3D::WarningTexture::activate(WarningTexture::Warning warning, bool 
     std::string text;
     bool red_colored = false;
     switch (m_warnings.back()) {
-        case ObjectOutside      : text = L("Detected object outside print volume"); break;
-        case ToolpathOutside    : text = L("Detected toolpath outside print volume"); break;
+        case ObjectOutside      : text = L("An object outside the print area was detected"); break;
+        case ToolpathOutside    : text = L("A toolpath outside the print area was detected"); break;
+        case SlaSupportsOutside : text = L("SLA supports outside the print area were detected"); break;
         case SomethingNotShown  : text = L("Some objects are not visible when editing supports"); break;
         case ObjectClashed: {
-            text = L("Detected object outside print volume\n"
-                     "Resolve a clash to continue slicing/export process correctly"); 
+            text = L("An object outside the print area was detected\n"
+                     "Resolve the current problem to continue slicing");
             red_colored = true;
             break;
         }
@@ -795,7 +797,7 @@ bool GLCanvas3D::WarningTexture::_generate(const std::string& msg_utf8, const GL
     if (msg_utf8.empty())
         return false;
 
-    wxString msg = _(msg_utf8);//GUI::from_u8(msg_utf8);
+    wxString msg = _(msg_utf8);
 
     wxMemoryDC memDC;
 
@@ -1201,6 +1203,7 @@ wxDEFINE_EVENT(EVT_GLCANVAS_INSTANCE_MOVED, SimpleEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_INSTANCE_ROTATED, SimpleEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_INSTANCE_SCALED, SimpleEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_WIPETOWER_MOVED, Vec3dEvent);
+wxDEFINE_EVENT(EVT_GLCANVAS_WIPETOWER_ROTATED, Vec3dEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_ENABLE_ACTION_BUTTONS, Event<bool>);
 wxDEFINE_EVENT(EVT_GLCANVAS_UPDATE_GEOMETRY, Vec3dsEvent<2>);
 wxDEFINE_EVENT(EVT_GLCANVAS_MOUSE_DRAGGING_FINISHED, SimpleEvent);
@@ -1688,11 +1691,11 @@ void GLCanvas3D::render()
     ImGuiWrapper& imgui = *wxGetApp().imgui();
     imgui.set_next_window_bg_alpha(0.5f);
     imgui.begin(std::string("Render statistics"), ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
-    imgui.text("Last frame: ");
+    imgui.text(_(L("Last frame")) +": ");
     ImGui::SameLine();
     imgui.text(std::to_string(m_render_stats.last_frame));
     ImGui::SameLine();
-    imgui.text(" ms");
+    imgui.text(" "+_(L("ms")));
     imgui.end();
 #endif // ENABLE_RENDER_STATISTICS
 
@@ -1710,6 +1713,16 @@ void GLCanvas3D::select_all()
 {
     m_selection.add_all();
     m_dirty = true;
+}
+
+void GLCanvas3D::deselect_all()
+{
+    m_selection.clear();
+    m_selection.set_mode(Selection::Instance);
+    wxGetApp().obj_manipul()->set_dirty();
+    m_gizmos.reset_all_states();
+    m_gizmos.update_data(*this);
+    post_event(SimpleEvent(EVT_GLCANVAS_OBJECT_SELECT));
 }
 
 void GLCanvas3D::delete_selected()
@@ -1783,7 +1796,7 @@ void GLCanvas3D::mirror_selection(Axis axis)
 {
     m_selection.mirror(axis);
     do_mirror();
-    wxGetApp().obj_manipul()->update_settings_value(m_selection);
+    wxGetApp().obj_manipul()->set_dirty();
 }
 
 // Reload the 3D scene of 
@@ -1828,6 +1841,7 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
     // State of the sla_steps for all SLAPrintObjects.
     std::vector<SLASupportState>   sla_support_state;
 
+    std::vector<size_t> instance_ids_selected;
     std::vector<size_t> map_glvolume_old_to_new(m_volumes.volumes.size(), size_t(-1));
     std::vector<GLVolume*> glvolumes_new;
     glvolumes_new.reserve(m_volumes.volumes.size());
@@ -1892,6 +1906,10 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
                 if (it != model_volume_state.end() && it->geometry_id == key.geometry_id)
 					mvs = &(*it);
             }
+            // Emplace instance ID of the volume. Both the aux volumes and model volumes share the same instance ID.
+            // The wipe tower has its own wipe_tower_instance_id().
+            if (m_selection.contains_volume(volume_id))
+                instance_ids_selected.emplace_back(volume->geometry_id.second);
             if (mvs == nullptr || force_full_scene_refresh) {
                 // This GLVolume will be released.
                 if (volume->is_wipe_tower) {
@@ -1923,13 +1941,18 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
                 }
             }
         }
+        sort_remove_duplicates(instance_ids_selected);
     }
 
     if (m_reload_delayed)
         return;
 
+	bool update_object_list = false;
+
     if (m_regenerate_volumes)
     {
+		if (m_volumes.volumes != glvolumes_new)
+			update_object_list = true;
         m_volumes.volumes = std::move(glvolumes_new);
         for (unsigned int obj_idx = 0; obj_idx < (unsigned int)m_model->objects.size(); ++ obj_idx) {
             const ModelObject &model_object = *m_model->objects[obj_idx];
@@ -1944,12 +1967,16 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
                         // New volume.
                         m_volumes.load_object_volume(&model_object, obj_idx, volume_idx, instance_idx, m_color_by, m_use_VBOs && m_initialized);
 						m_volumes.volumes.back()->geometry_id = key.geometry_id;
+						update_object_list = true;
                     } else {
 						// Recycling an old GLVolume.
 						GLVolume &existing_volume = *m_volumes.volumes[it->volume_idx];
                         assert(existing_volume.geometry_id == key.geometry_id);
 						// Update the Object/Volume/Instance indices into the current Model.
-                        existing_volume.composite_id = it->composite_id;
+						if (existing_volume.composite_id != it->composite_id) {
+							existing_volume.composite_id = it->composite_id;
+							update_object_list = true;
+						}
                     }
                 }
             }
@@ -2051,13 +2078,18 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
 
         update_volumes_colors_by_extruder();
 		// Update selection indices based on the old/new GLVolumeCollection.
-		m_selection.volumes_changed(map_glvolume_old_to_new);
+        if (m_selection.get_mode() == Selection::Instance)
+            m_selection.instances_changed(instance_ids_selected);
+        else
+            m_selection.volumes_changed(map_glvolume_old_to_new);
 	}
 
     m_gizmos.update_data(*this);
+    m_gizmos.refresh_on_off_state(m_selection);
 
     // Update the toolbar
-    post_event(SimpleEvent(EVT_GLCANVAS_OBJECT_SELECT));
+	if (update_object_list)
+		post_event(SimpleEvent(EVT_GLCANVAS_OBJECT_SELECT));
 
     // checks for geometry outside the print volume to render it accordingly
     if (!m_volumes.empty())
@@ -2108,7 +2140,7 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
         // to force a reset of its cache
         auto manip = wxGetApp().obj_manipul();
         if (manip != nullptr)
-            manip->update_settings_value(m_selection);
+            manip->set_dirty();
     }
 
     // and force this canvas to be redrawn.
@@ -2139,13 +2171,13 @@ void GLCanvas3D::load_gcode_preview(const GCodePreviewData& preview_data, const 
                 m_volumes.volumes.erase(std::remove_if(m_volumes.volumes.begin(), m_volumes.volumes.end(),
                     [](const GLVolume* volume) { return volume->print_zs.empty(); }), m_volumes.volumes.end());
 
-                _load_shells_fff();
+                _load_fff_shells();
             }
             _update_toolpath_volumes_outside_state();
         }
         
         _update_gcode_volumes_visibility(preview_data);
-        _show_warning_texture_if_needed();
+        _show_warning_texture_if_needed(WarningTexture::ToolpathOutside);
 
         if (m_volumes.empty())
             reset_legend_texture();
@@ -2160,7 +2192,9 @@ void GLCanvas3D::load_sla_preview()
     if ((m_canvas != nullptr) && (print != nullptr))
     {
         _set_current();
-        _load_shells_sla();
+        _load_sla_shells();
+        _update_sla_shells_outside_state();
+        _show_warning_texture_if_needed(WarningTexture::SlaSupportsOutside);
     }
 }
 
@@ -2186,7 +2220,7 @@ void GLCanvas3D::load_preview(const std::vector<std::string>& str_tool_colors, c
     }
 
     _update_toolpath_volumes_outside_state();
-    _show_warning_texture_if_needed();
+    _show_warning_texture_if_needed(WarningTexture::ToolpathOutside);
     if (color_print_values.empty())
         reset_legend_texture();
     else {
@@ -2258,6 +2292,9 @@ void GLCanvas3D::on_size(wxSizeEvent& evt)
 
 void GLCanvas3D::on_idle(wxIdleEvent& evt)
 {
+    if (!m_initialized)
+        return;
+
     m_dirty |= m_toolbar.update_items_state();
     m_dirty |= m_view_toolbar.update_items_state();
 
@@ -2335,7 +2372,8 @@ void GLCanvas3D::on_char(wxKeyEvent& evt)
                   post_event(SimpleEvent(EVT_GLTOOLBAR_DELETE));
                   break;
 
-		case '0': { select_view("iso"); break; }
+        case WXK_ESCAPE: { deselect_all(); break; }
+        case '0': { select_view("iso"); break; }
         case '1': { select_view("top"); break; }
         case '2': { select_view("bottom"); break; }
         case '3': { select_view("front"); break; }
@@ -2355,11 +2393,7 @@ void GLCanvas3D::on_char(wxKeyEvent& evt)
         case 'o': { set_camera_zoom(-1.0f); break; }
         case 'Z':
         case 'z': { m_selection.is_empty() ? zoom_to_volumes() : zoom_to_selection(); break; }
-        default:
-        {
-            evt.Skip();
-            break;
-        }
+        default:  { evt.Skip(); break; }
         }
     }
 }
@@ -2723,7 +2757,11 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
                     // propagate event through callback
                     if (curr_idxs != m_selection.get_volume_idxs())
                     {
-                        m_gizmos.refresh_on_off_state(m_selection);
+                        if (m_selection.is_empty())
+                            m_gizmos.reset_all_states();
+                        else
+                            m_gizmos.refresh_on_off_state(m_selection);
+
                         m_gizmos.update_data(*this);
                         post_event(SimpleEvent(EVT_GLCANVAS_OBJECT_SELECT));
                         m_dirty = true;
@@ -2796,7 +2834,7 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
 
             m_regenerate_volumes = false;
             m_selection.translate(cur_pos - m_mouse.drag.start_position_3D);
-            wxGetApp().obj_manipul()->update_settings_value(m_selection);
+            wxGetApp().obj_manipul()->set_dirty();
             m_dirty = true;
         }
     }
@@ -2856,7 +2894,7 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
         {
             m_regenerate_volumes = false;
             do_move();
-            wxGetApp().obj_manipul()->update_settings_value(m_selection);
+            wxGetApp().obj_manipul()->set_dirty();
             // Let the platter know that the dragging finished, so a delayed refresh
             // of the scene with the background processing data should be performed.
             post_event(SimpleEvent(EVT_GLCANVAS_MOUSE_DRAGGING_FINISHED));
@@ -2872,14 +2910,7 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
         {
             // deselect and propagate event through callback
             if (!evt.ShiftDown() && m_picking_enabled)
-            {
-                m_selection.clear();
-                m_selection.set_mode(Selection::Instance);
-                wxGetApp().obj_manipul()->update_settings_value(m_selection);
-                m_gizmos.reset_all_states();
-                m_gizmos.update_data(*this);
-                post_event(SimpleEvent(EVT_GLCANVAS_OBJECT_SELECT));
-            }
+                deselect_all();
         }
         else if (evt.LeftUp() && m_mouse.dragging)
             // Flips X mouse deltas if bed is upside down
@@ -2902,7 +2933,7 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
                     m_gizmos.refresh_on_off_state(m_selection);
                     post_event(SimpleEvent(EVT_GLCANVAS_OBJECT_SELECT));
                     m_gizmos.update_data(*this);
-                    wxGetApp().obj_manipul()->update_settings_value(m_selection);
+                    wxGetApp().obj_manipul()->set_dirty();
                     // forces a frame render to update the view before the context menu is shown
                     render();
 
@@ -3013,10 +3044,10 @@ void GLCanvas3D::set_tooltip(const std::string& tooltip) const
             if (tooltip.empty())
                 m_canvas->UnsetToolTip();
             else
-                t->SetTip(tooltip);
+                t->SetTip(wxString::FromUTF8(tooltip.data()));
         }
         else if (!tooltip.empty()) // Avoid "empty" tooltips => unset of the empty tooltip leads to application crash under OSX
-            m_canvas->SetToolTip(tooltip);
+            m_canvas->SetToolTip(wxString::FromUTF8(tooltip.data()));
     }
 }
 
@@ -3090,6 +3121,10 @@ void GLCanvas3D::do_rotate()
     for (const GLVolume* v : m_volumes.volumes)
     {
         int object_idx = v->object_idx();
+        if (object_idx == 1000) { // the wipe tower
+            Vec3d offset = v->get_volume_offset();
+            post_event(Vec3dEvent(EVT_GLCANVAS_WIPETOWER_ROTATED, Vec3d(offset(0), offset(1), v->get_volume_rotation()(2))));
+        }
         if ((object_idx < 0) || ((int)m_model->objects.size() <= object_idx))
             continue;
 
@@ -3286,6 +3321,38 @@ void GLCanvas3D::update_ui_from_settings()
 #endif
 }
 
+
+
+arr::WipeTowerInfo GLCanvas3D::get_wipe_tower_info() const
+{
+    arr::WipeTowerInfo wti;
+    for (const GLVolume* vol : m_volumes.volumes) {
+        if (vol->is_wipe_tower) {
+            wti.is_wipe_tower = true;
+            wti.pos = Vec2d(m_config->opt_float("wipe_tower_x"),
+                            m_config->opt_float("wipe_tower_y"));
+            wti.rotation = (M_PI/180.) * m_config->opt_float("wipe_tower_rotation_angle");
+            const BoundingBoxf3& bb = vol->bounding_box;
+            wti.bb_size = Vec2d(bb.size()(0), bb.size()(1));
+            break;
+        }
+    }
+    return wti;
+}
+
+
+void GLCanvas3D::arrange_wipe_tower(const arr::WipeTowerInfo& wti) const
+{
+    if (wti.is_wipe_tower) {
+        DynamicPrintConfig cfg;
+        cfg.opt<ConfigOptionFloat>("wipe_tower_x", true)->value = wti.pos(0);
+        cfg.opt<ConfigOptionFloat>("wipe_tower_y", true)->value = wti.pos(1);
+        cfg.opt<ConfigOptionFloat>("wipe_tower_rotation_angle", true)->value = (180./M_PI) * wti.rotation;
+        wxGetApp().get_tab(Preset::TYPE_PRINT)->load_config(cfg);
+    }
+}
+
+
 Linef3 GLCanvas3D::mouse_ray(const Point& mouse_pos)
 {
     float z0 = 0.0f;
@@ -3367,7 +3434,7 @@ bool GLCanvas3D::_init_toolbar()
 #if ENABLE_SVG_ICONS
     item.icon_filename = "add.svg";
 #endif // ENABLE_SVG_ICONS
-    item.tooltip = GUI::L_str("Add...") + " [" + GUI::shortkey_ctrl_prefix() + "I]";
+    item.tooltip = _utf8(L("Add...")) + " [" + GUI::shortkey_ctrl_prefix() + "I]";
     item.sprite_id = 0;
     item.action_callback = [this]() { if (m_canvas != nullptr) wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_ADD)); };
     if (!m_toolbar.add_item(item))
@@ -3377,7 +3444,7 @@ bool GLCanvas3D::_init_toolbar()
 #if ENABLE_SVG_ICONS
     item.icon_filename = "remove.svg";
 #endif // ENABLE_SVG_ICONS
-    item.tooltip = GUI::L_str("Delete") + " [Del]";
+    item.tooltip = _utf8(L("Delete")) + " [Del]";
     item.sprite_id = 1;
     item.action_callback = [this]() { if (m_canvas != nullptr) wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_DELETE)); };
     item.enabled_state_callback = []()->bool { return wxGetApp().plater()->can_delete(); };
@@ -3388,7 +3455,7 @@ bool GLCanvas3D::_init_toolbar()
 #if ENABLE_SVG_ICONS
     item.icon_filename = "delete_all.svg";
 #endif // ENABLE_SVG_ICONS
-    item.tooltip = GUI::L_str("Delete all") + " [" + GUI::shortkey_ctrl_prefix() + "Del]";
+    item.tooltip = _utf8(L("Delete all")) + " [" + GUI::shortkey_ctrl_prefix() + "Del]";
     item.sprite_id = 2;
     item.action_callback = [this]() { if (m_canvas != nullptr) wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_DELETE_ALL)); };
     item.enabled_state_callback = []()->bool { return wxGetApp().plater()->can_delete_all(); };
@@ -3399,7 +3466,7 @@ bool GLCanvas3D::_init_toolbar()
 #if ENABLE_SVG_ICONS
     item.icon_filename = "arrange.svg";
 #endif // ENABLE_SVG_ICONS
-    item.tooltip = GUI::L_str("Arrange [A]");
+    item.tooltip = _utf8(L("Arrange")) + " [A]";
     item.sprite_id = 3;
     item.action_callback = [this]() { if (m_canvas != nullptr) wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_ARRANGE)); };
     item.enabled_state_callback = []()->bool { return wxGetApp().plater()->can_arrange(); };
@@ -3413,7 +3480,7 @@ bool GLCanvas3D::_init_toolbar()
 #if ENABLE_SVG_ICONS
     item.icon_filename = "copy.svg";
 #endif // ENABLE_SVG_ICONS
-    item.tooltip = GUI::L_str("Copy") + " [" + GUI::shortkey_ctrl_prefix() + "C]";
+    item.tooltip = _utf8(L("Copy")) + " [" + GUI::shortkey_ctrl_prefix() + "C]";
     item.sprite_id = 4;
     item.action_callback = [this]() { if (m_canvas != nullptr) wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_COPY)); };
     item.enabled_state_callback = []()->bool { return wxGetApp().plater()->can_copy(); };
@@ -3424,7 +3491,7 @@ bool GLCanvas3D::_init_toolbar()
 #if ENABLE_SVG_ICONS
     item.icon_filename = "paste.svg";
 #endif // ENABLE_SVG_ICONS
-    item.tooltip = GUI::L_str("Paste") + " [" + GUI::shortkey_ctrl_prefix() + "V]";
+    item.tooltip = _utf8(L("Paste")) + " [" + GUI::shortkey_ctrl_prefix() + "V]";
     item.sprite_id = 5;
     item.action_callback = [this]() { if (m_canvas != nullptr) wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_PASTE)); };
     item.enabled_state_callback = []()->bool { return wxGetApp().plater()->can_paste(); };
@@ -3438,7 +3505,7 @@ bool GLCanvas3D::_init_toolbar()
 #if ENABLE_SVG_ICONS
     item.icon_filename = "instance_add.svg";
 #endif // ENABLE_SVG_ICONS
-    item.tooltip = GUI::L_str("Add instance [+]");
+    item.tooltip = _utf8(L("Add instance")) + " [+]";
     item.sprite_id = 6;
     item.action_callback = [this]() { if (m_canvas != nullptr) wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_MORE)); };
     item.visibility_callback = []()->bool { return wxGetApp().get_mode() != comSimple; };
@@ -3450,7 +3517,7 @@ bool GLCanvas3D::_init_toolbar()
 #if ENABLE_SVG_ICONS
     item.icon_filename = "instance_remove.svg";
 #endif // ENABLE_SVG_ICONS
-    item.tooltip = GUI::L_str("Remove instance [-]");
+    item.tooltip = _utf8(L("Remove instance")) + " [-]";
     item.sprite_id = 7;
     item.action_callback = [this]() { if (m_canvas != nullptr) wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_FEWER)); };
     item.visibility_callback = []()->bool { return wxGetApp().get_mode() != comSimple; };
@@ -3465,7 +3532,7 @@ bool GLCanvas3D::_init_toolbar()
 #if ENABLE_SVG_ICONS
     item.icon_filename = "split_objects.svg";
 #endif // ENABLE_SVG_ICONS
-    item.tooltip = GUI::L_str("Split to objects");
+    item.tooltip = _utf8(L("Split to objects"));
     item.sprite_id = 8;
     item.action_callback = [this]() { if (m_canvas != nullptr) wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_SPLIT_OBJECTS)); };
     item.visibility_callback = GLToolbarItem::Default_Visibility_Callback;
@@ -3477,7 +3544,7 @@ bool GLCanvas3D::_init_toolbar()
 #if ENABLE_SVG_ICONS
     item.icon_filename = "split_parts.svg";
 #endif // ENABLE_SVG_ICONS
-    item.tooltip = GUI::L_str("Split to parts");
+    item.tooltip = _utf8(L("Split to parts"));
     item.sprite_id = 9;
     item.action_callback = [this]() { if (m_canvas != nullptr) wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_SPLIT_VOLUMES)); };
     item.visibility_callback = []()->bool { return wxGetApp().get_mode() != comSimple; };
@@ -3492,7 +3559,7 @@ bool GLCanvas3D::_init_toolbar()
 #if ENABLE_SVG_ICONS
     item.icon_filename = "layers_white.svg";
 #endif // ENABLE_SVG_ICONS
-    item.tooltip = GUI::L_str("Layers editing");
+    item.tooltip = _utf8(L("Layers editing"));
     item.sprite_id = 10;
     item.is_toggable = true;
     item.action_callback = [this]() { if (m_canvas != nullptr) wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_LAYERSEDITING)); };
@@ -3548,7 +3615,8 @@ void GLCanvas3D::_resize(unsigned int w, unsigned int h)
         }
 
         // FIXME: calculate a tighter value for depth will improve z-fighting
-        float depth = 5.0f * (float)bbox.max_size();
+        // Set at least some minimum depth in case the bounding box is empty to avoid an OpenGL driver error.
+        float depth = std::max(1.f, 5.0f * (float)bbox.max_size());
         m_camera.apply_ortho_projection(-w2, w2, -h2, h2, -depth, depth);
 
         break;
@@ -3957,8 +4025,7 @@ void GLCanvas3D::_render_selection() const
 #if ENABLE_RENDER_SELECTION_CENTER
 void GLCanvas3D::_render_selection_center() const
 {
-    if (!m_gizmos.is_running())
-        m_selection.render_center();
+    m_selection.render_center(m_gizmos.is_dragging());
 }
 #endif // ENABLE_RENDER_SELECTION_CENTER
 
@@ -4288,6 +4355,7 @@ void GLCanvas3D::_render_selection_sidebar_hints() const
     if (m_use_VBOs)
         m_shader.stop_using();
 }
+
 
 void GLCanvas3D::_update_volumes_hover_state() const
 {
@@ -5258,7 +5326,7 @@ bool GLCanvas3D::_travel_paths_by_tool(const GCodePreviewData& preview_data, con
     // creates a new volume for each tool
     for (Tool& tool : tools)
     {
-        // tool.value could be invalid (as it was with https://github.com/prusa3d/Slic3r/issues/2179), we better check
+        // tool.value could be invalid (as it was with https://github.com/prusa3d/PrusaSlicer/issues/2179), we better check
         if (tool.value >= tool_colors.size())
             continue;
 
@@ -5351,7 +5419,7 @@ void GLCanvas3D::_load_gcode_unretractions(const GCodePreviewData& preview_data)
     }
 }
 
-void GLCanvas3D::_load_shells_fff()
+void GLCanvas3D::_load_fff_shells()
 {
     size_t initial_volumes_count = m_volumes.volumes.size();
     m_gcode_preview_volume_index.first_volumes.emplace_back(GCodePreviewVolumeIndex::Shell, 0, (unsigned int)initial_volumes_count);
@@ -5400,7 +5468,7 @@ void GLCanvas3D::_load_shells_fff()
     }
 }
 
-void GLCanvas3D::_load_shells_sla()
+void GLCanvas3D::_load_sla_shells()
 {
     //FIXME use reload_scene
 #if 1
@@ -5409,13 +5477,13 @@ void GLCanvas3D::_load_shells_sla()
         // nothing to render, return
         return;
 
-    auto add_volume = [this](const SLAPrintObject &object, const SLAPrintObject::Instance& instance, 
-                             const TriangleMesh &mesh, const float color[4], bool outside_printer_detection_enabled) {
+    auto add_volume = [this](const SLAPrintObject &object, int volume_id, const SLAPrintObject::Instance& instance,
+        const TriangleMesh &mesh, const float color[4], bool outside_printer_detection_enabled) {
         m_volumes.volumes.emplace_back(new GLVolume(color));
         GLVolume& v = *m_volumes.volumes.back();
         v.indexed_vertex_array.load_mesh(mesh, m_use_VBOs);
 		v.shader_outside_printer_detection_enabled = outside_printer_detection_enabled;
-        v.composite_id.volume_id = -1;
+        v.composite_id.volume_id = volume_id;
         v.set_instance_offset(unscale(instance.shift(0), instance.shift(1), 0));
         v.set_instance_rotation(Vec3d(0.0, 0.0, (double)instance.rotation));
         v.set_instance_mirror(X, object.is_left_handed() ? -1. : 1.);
@@ -5426,15 +5494,14 @@ void GLCanvas3D::_load_shells_sla()
         if (obj->is_step_done(slaposSliceSupports)) {
             unsigned int initial_volumes_count = (unsigned int)m_volumes.volumes.size();
             for (const SLAPrintObject::Instance& instance : obj->instances()) {
-                add_volume(*obj, instance, obj->transformed_mesh(), GLVolume::MODEL_COLOR[0], true);
+                add_volume(*obj, 0, instance, obj->transformed_mesh(), GLVolume::MODEL_COLOR[0], true);
                 // Set the extruder_id and volume_id to achieve the same color as in the 3D scene when
                 // through the update_volumes_colors_by_extruder() call.
                 m_volumes.volumes.back()->extruder_id = obj->model_object()->volumes.front()->extruder_id();
-                m_volumes.volumes.back()->composite_id.volume_id = 0;
                 if (obj->is_step_done(slaposSupportTree) && obj->has_mesh(slaposSupportTree))
-                    add_volume(*obj, instance, obj->support_mesh(), GLVolume::SLA_SUPPORT_COLOR, true);
+                    add_volume(*obj, -int(slaposSupportTree), instance, obj->support_mesh(), GLVolume::SLA_SUPPORT_COLOR, true);
                 if (obj->is_step_done(slaposBasePool) && obj->has_mesh(slaposBasePool))
-                    add_volume(*obj, instance, obj->pad_mesh(), GLVolume::SLA_PAD_COLOR, true);
+                    add_volume(*obj, -int(slaposBasePool), instance, obj->pad_mesh(), GLVolume::SLA_PAD_COLOR, true);
             }
             double shift_z = obj->get_current_elevation();
             for (unsigned int i = initial_volumes_count; i < m_volumes.volumes.size(); ++ i) {
@@ -5536,10 +5603,35 @@ void GLCanvas3D::_update_toolpath_volumes_outside_state()
     }
 }
 
-void GLCanvas3D::_show_warning_texture_if_needed()
+void GLCanvas3D::_update_sla_shells_outside_state()
+{
+    // tolerance to avoid false detection at bed edges
+    static const double tolerance_x = 0.05;
+    static const double tolerance_y = 0.05;
+
+    BoundingBoxf3 print_volume;
+    if (m_config != nullptr)
+    {
+        const ConfigOptionPoints* opt = dynamic_cast<const ConfigOptionPoints*>(m_config->option("bed_shape"));
+        if (opt != nullptr)
+        {
+            BoundingBox bed_box_2D = get_extents(Polygon::new_scale(opt->values));
+            print_volume = BoundingBoxf3(Vec3d(unscale<double>(bed_box_2D.min(0)) - tolerance_x, unscale<double>(bed_box_2D.min(1)) - tolerance_y, 0.0), Vec3d(unscale<double>(bed_box_2D.max(0)) + tolerance_x, unscale<double>(bed_box_2D.max(1)) + tolerance_y, m_config->opt_float("max_print_height")));
+            // Allow the objects to protrude below the print bed
+            print_volume.min(2) = -1e10;
+        }
+    }
+
+    for (GLVolume* volume : m_volumes.volumes)
+    {
+        volume->is_outside = ((print_volume.radius() > 0.0) && volume->is_sla_support()) ? !print_volume.contains(volume->transformed_convex_hull_bounding_box()) : false;
+    }
+}
+
+void GLCanvas3D::_show_warning_texture_if_needed(WarningTexture::Warning warning)
 {
     _set_current();
-    _set_warning_texture(WarningTexture::ToolpathOutside, _is_any_volume_outside());
+    _set_warning_texture(warning, _is_any_volume_outside());
 }
 
 std::vector<float> GLCanvas3D::_parse_colors(const std::vector<std::string>& colors)
@@ -5701,7 +5793,11 @@ void GLCanvas3D::_update_selection_from_hover()
             m_selection.remove(i);
     }
 
-    m_gizmos.refresh_on_off_state(m_selection);
+    if (m_selection.is_empty())
+        m_gizmos.reset_all_states();
+    else
+        m_gizmos.refresh_on_off_state(m_selection);
+
     m_gizmos.update_data(*this);
     post_event(SimpleEvent(EVT_GLCANVAS_OBJECT_SELECT));
     m_dirty = true;

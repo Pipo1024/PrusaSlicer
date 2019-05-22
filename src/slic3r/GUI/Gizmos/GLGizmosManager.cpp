@@ -4,6 +4,7 @@
 #include "slic3r/GUI/3DScene.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
 #include "slic3r/GUI/GUI_ObjectManipulation.hpp"
+#include "slic3r/GUI/PresetBundle.hpp"
 
 #include <GL/glew.h>
 #include <wx/glcanvas.h>
@@ -247,14 +248,14 @@ void GLGizmosManager::enable_grabber(EType type, unsigned int id, bool enable)
     }
 }
 
-void GLGizmosManager::update(const Linef3& mouse_ray, const Selection& selection, bool shift_down, const Point* mouse_pos)
+void GLGizmosManager::update(const Linef3& mouse_ray, const Selection& selection, const Point* mouse_pos)
 {
     if (!m_enabled)
         return;
 
     GLGizmoBase* curr = get_current();
     if (curr != nullptr)
-        curr->update(GLGizmoBase::UpdateData(mouse_ray, mouse_pos, shift_down), selection);
+        curr->update(GLGizmoBase::UpdateData(mouse_ray, mouse_pos), selection);
 }
 
 void GLGizmosManager::update_data(GLCanvas3D& canvas)
@@ -264,8 +265,11 @@ void GLGizmosManager::update_data(GLCanvas3D& canvas)
 
     const Selection& selection = canvas.get_selection();
 
-    bool enable_move_z = !selection.is_wipe_tower();
-    enable_grabber(Move, 2, enable_move_z);
+    bool is_wipe_tower = selection.is_wipe_tower();
+    enable_grabber(Move, 2, !is_wipe_tower);
+    enable_grabber(Rotate, 0, !is_wipe_tower);
+    enable_grabber(Rotate, 1, !is_wipe_tower);
+
     bool enable_scale_xyz = selection.is_single_full_instance() || selection.is_single_volume() || selection.is_single_modifier();
     for (int i = 0; i < 6; ++i)
     {
@@ -287,6 +291,14 @@ void GLGizmosManager::update_data(GLCanvas3D& canvas)
         const GLVolume* volume = selection.get_volume(*selection.get_volume_idxs().begin());
         set_scale(volume->get_volume_scaling_factor());
         set_rotation(Vec3d::Zero());
+        set_flattening_data(nullptr);
+        set_sla_support_data(nullptr, selection);
+    }
+    else if (is_wipe_tower)
+    {
+        DynamicPrintConfig& config = wxGetApp().preset_bundle->prints.get_edited_preset().config;
+        set_scale(Vec3d::Ones());
+        set_rotation(Vec3d(0., 0., (M_PI/180.) * dynamic_cast<const ConfigOptionFloat*>(config.option("wipe_tower_rotation_angle"))->value));
         set_flattening_data(nullptr);
         set_sla_support_data(nullptr, selection);
     }
@@ -404,6 +416,15 @@ void GLGizmosManager::set_scale(const Vec3d& scale)
     GizmosMap::const_iterator it = m_gizmos.find(Scale);
     if (it != m_gizmos.end())
         reinterpret_cast<GLGizmoScale3D*>(it->second)->set_scale(scale);
+}
+
+Vec3d GLGizmosManager::get_scale_offset() const
+{
+    if (!m_enabled)
+        return Vec3d::Zero();
+
+    GizmosMap::const_iterator it = m_gizmos.find(Scale);
+    return (it != m_gizmos.end()) ? reinterpret_cast<GLGizmoScale3D*>(it->second)->get_offset() : Vec3d::Zero();
 }
 
 Vec3d GLGizmosManager::get_rotation() const
@@ -590,7 +611,7 @@ bool GLGizmosManager::on_mouse(wxMouseEvent& evt, GLCanvas3D& canvas)
                     // Rotate the object so the normal points downward:
                     selection.flattening_rotate(get_flattening_normal());
                     canvas.do_flatten();
-                    wxGetApp().obj_manipul()->update_settings_value(selection);
+                    wxGetApp().obj_manipul()->set_dirty();
                 }
 
                 canvas.set_as_dirty();
@@ -615,7 +636,7 @@ bool GLGizmosManager::on_mouse(wxMouseEvent& evt, GLCanvas3D& canvas)
                 canvas.get_wxglcanvas()->CaptureMouse();
 
             canvas.set_mouse_as_dragging();
-            update(canvas.mouse_ray(pos), selection, evt.ShiftDown(), &pos);
+            update(canvas.mouse_ray(pos), selection, &pos);
 
             switch (m_current)
             {
@@ -623,14 +644,19 @@ bool GLGizmosManager::on_mouse(wxMouseEvent& evt, GLCanvas3D& canvas)
             {
                 // Apply new temporary offset
                 selection.translate(get_displacement());
-                wxGetApp().obj_manipul()->update_settings_value(selection);
+                wxGetApp().obj_manipul()->set_dirty();
                 break;
             }
             case Scale:
             {
                 // Apply new temporary scale factors
-                selection.scale(get_scale(), evt.AltDown());
-                wxGetApp().obj_manipul()->update_settings_value(selection);
+				TransformationType transformation_type(TransformationType::Local_Absolute_Joint);
+				if (evt.AltDown())
+					transformation_type.set_independent();
+				selection.scale(get_scale(), transformation_type);
+                if (evt.ControlDown())
+                    selection.translate(get_scale_offset(), true);
+                wxGetApp().obj_manipul()->set_dirty();
                 break;
             }
             case Rotate:
@@ -640,7 +666,7 @@ bool GLGizmosManager::on_mouse(wxMouseEvent& evt, GLCanvas3D& canvas)
                 if (evt.AltDown())
                     transformation_type.set_independent();
                 selection.rotate(get_rotation(), transformation_type);
-                wxGetApp().obj_manipul()->update_settings_value(selection);
+                wxGetApp().obj_manipul()->set_dirty();
                 break;
             }
             default:
@@ -677,7 +703,7 @@ bool GLGizmosManager::on_mouse(wxMouseEvent& evt, GLCanvas3D& canvas)
             stop_dragging();
             update_data(canvas);
 
-            wxGetApp().obj_manipul()->update_settings_value(selection);
+            wxGetApp().obj_manipul()->set_dirty();
             // Let the platter know that the dragging finished, so a delayed refresh
             // of the scene with the background processing data should be performed.
             canvas.post_event(SimpleEvent(EVT_GLCANVAS_MOUSE_DRAGGING_FINISHED));
@@ -765,10 +791,13 @@ bool GLGizmosManager::on_char(wxKeyEvent& evt, GLCanvas3D& canvas)
         // key ESC
         case WXK_ESCAPE:
         {
-            if ((m_current != SlaSupports) || !gizmo_event(SLAGizmoEventType::DiscardChanges))
-                reset_all_states();
+            if (m_current != Undefined)
+            {
+                if ((m_current != SlaSupports) || !gizmo_event(SLAGizmoEventType::DiscardChanges))
+                    reset_all_states();
 
-            processed = true;
+                processed = true;
+            }
             break;
         }
         case WXK_RETURN:

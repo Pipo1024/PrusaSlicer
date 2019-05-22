@@ -3,6 +3,7 @@
 
 #include <GL/glew.h>
 
+#include <wx/utils.h> 
 
 namespace Slic3r {
 namespace GUI {
@@ -48,7 +49,7 @@ bool GLGizmoMove3D::on_init()
 
 std::string GLGizmoMove3D::on_get_name() const
 {
-    return L("Move [M]");
+    return (_(L("Move")) + " [M]").ToUTF8().data();
 }
 
 void GLGizmoMove3D::on_start_dragging(const Selection& selection)
@@ -206,7 +207,7 @@ double GLGizmoMove3D::calc_projection(const UpdateData& data) const
         projection = inters_vec.dot(starting_vec.normalized());
     }
 
-    if (data.shift_down)
+    if (wxGetKeyState(WXK_SHIFT))
         projection = m_snap_step * (double)std::round(projection / m_snap_step);
 
     return projection;

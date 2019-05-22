@@ -36,7 +36,7 @@ static wxString generate_html_row(const Config::Snapshot &snapshot, bool row_eve
     text += "\">";
     text += "<td>";
     // Format the row header.
-    text += wxString("<font size=\"5\"><b>") + (snapshot_active ? _(L("Active: ")) : "") + 
+    text += wxString("<font size=\"5\"><b>") + (snapshot_active ? _(L("Active")) + ": " : "") + 
         Utils::format_local_date_time(snapshot.time_captured) + ": " + format_reason(snapshot.reason);
     if (! snapshot.comment.empty())
         text += " (" + wxString::FromUTF8(snapshot.comment.data()) + ")";
@@ -159,13 +159,11 @@ void ConfigSnapshotDialog::onLinkClicked(wxHtmlLinkEvent &event)
 {
     m_snapshot_to_activate = event.GetLinkInfo().GetHref();
     this->EndModal(wxID_CLOSE);
-    this->Close();
 }
 
 void ConfigSnapshotDialog::onCloseDialog(wxEvent &)
 {
     this->EndModal(wxID_CLOSE);
-    this->Close();
 }
 
 } // namespace GUI

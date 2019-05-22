@@ -24,6 +24,19 @@ unsigned int Model::s_auto_extruder_id = 1;
 
 size_t ModelBase::s_last_id = 0;
 
+// Unique object / instance ID for the wipe tower.
+ModelID wipe_tower_object_id()
+{
+    static ModelBase mine;
+    return mine.id();
+}
+
+ModelID wipe_tower_instance_id()
+{
+    static ModelBase mine;
+    return mine.id();
+}
+
 Model& Model::assign_copy(const Model &rhs)
 {
     this->copy_id(rhs);
@@ -490,9 +503,7 @@ void Model::convert_multipart_object(unsigned int max_extruders)
             {
                 new_v->name = o->name;
                 new_v->config.set_deserialize("extruder", get_auto_extruder_id_as_string(max_extruders));
-#if ENABLE_VOLUMES_CENTERING_FIXES
                 new_v->translate(-o->origin_translation);
-#endif // ENABLE_VOLUMES_CENTERING_FIXES
             }
         }
 
@@ -668,9 +679,7 @@ ModelVolume* ModelObject::add_volume(const TriangleMesh &mesh)
 {
     ModelVolume* v = new ModelVolume(this, mesh);
     this->volumes.push_back(v);
-#if ENABLE_VOLUMES_CENTERING_FIXES
     v->center_geometry();
-#endif // ENABLE_VOLUMES_CENTERING_FIXES
     this->invalidate_bounding_box();
     return v;
 }
@@ -679,9 +688,7 @@ ModelVolume* ModelObject::add_volume(TriangleMesh &&mesh)
 {
     ModelVolume* v = new ModelVolume(this, std::move(mesh));
     this->volumes.push_back(v);
-#if ENABLE_VOLUMES_CENTERING_FIXES
     v->center_geometry();
-#endif // ENABLE_VOLUMES_CENTERING_FIXES
     this->invalidate_bounding_box();
     return v;
 }
@@ -690,9 +697,7 @@ ModelVolume* ModelObject::add_volume(const ModelVolume &other)
 {
     ModelVolume* v = new ModelVolume(this, other);
     this->volumes.push_back(v);
-#if ENABLE_VOLUMES_CENTERING_FIXES
     v->center_geometry();
-#endif // ENABLE_VOLUMES_CENTERING_FIXES
     this->invalidate_bounding_box();
     return v;
 }
@@ -701,9 +706,7 @@ ModelVolume* ModelObject::add_volume(const ModelVolume &other, TriangleMesh &&me
 {
     ModelVolume* v = new ModelVolume(this, other, std::move(mesh));
     this->volumes.push_back(v);
-#if ENABLE_VOLUMES_CENTERING_FIXES
     v->center_geometry();
-#endif // ENABLE_VOLUMES_CENTERING_FIXES
     this->invalidate_bounding_box();
     return v;
 }
@@ -714,7 +717,6 @@ void ModelObject::delete_volume(size_t idx)
     delete *i;
     this->volumes.erase(i);
 
-#if ENABLE_VOLUMES_CENTERING_FIXES
     if (this->volumes.size() == 1)
     {
         // only one volume left
@@ -730,24 +732,6 @@ void ModelObject::delete_volume(size_t idx)
         v->set_transformation(t);
         v->set_new_unique_id();
     }
-#else
-    if (this->volumes.size() == 1)
-    {
-        // only one volume left
-        // center it and update the instances accordingly
-        // rationale: the volume may be shifted with respect to the object center and this may lead to wrong rotation and scaling 
-        // when modifying the instance matrix of the derived GLVolume
-        ModelVolume* v = this->volumes.front();
-        v->center_geometry();
-        const Vec3d& vol_offset = v->get_offset();
-        for (ModelInstance* inst : this->instances)
-        {
-            inst->set_offset(inst->get_offset() + inst->get_matrix(true) * vol_offset);
-        }
-        v->set_offset(Vec3d::Zero());
-        v->set_new_unique_id();
-    }
-#endif // ENABLE_VOLUMES_CENTERING_FIXES
 
     this->invalidate_bounding_box();
 }
@@ -890,28 +874,15 @@ const BoundingBoxf3& ModelObject::raw_bounding_box() const
     if (! m_raw_bounding_box_valid) {
         m_raw_bounding_box_valid = true;
         m_raw_bounding_box.reset();
-    #if ENABLE_GENERIC_SUBPARTS_PLACEMENT
         if (this->instances.empty())
             throw std::invalid_argument("Can't call raw_bounding_box() with no instances");
 
         const Transform3d& inst_matrix = this->instances.front()->get_transformation().get_matrix(true);
-    #endif // ENABLE_GENERIC_SUBPARTS_PLACEMENT
         for (const ModelVolume *v : this->volumes)
-            if (v->is_model_part()) {
-    #if !ENABLE_GENERIC_SUBPARTS_PLACEMENT
-                if (this->instances.empty())
-                    throw std::invalid_argument("Can't call raw_bounding_box() with no instances");
-    #endif // !ENABLE_GENERIC_SUBPARTS_PLACEMENT
-
-    #if ENABLE_GENERIC_SUBPARTS_PLACEMENT
-				m_raw_bounding_box.merge(v->mesh.transformed_bounding_box(inst_matrix * v->get_matrix()));
-    #else
-                // unmaintaned
-                assert(false);
-                // vol_mesh.transform(v->get_matrix());
-                // m_raw_bounding_box_valid.merge(this->instances.front()->transform_mesh_bounding_box(vol_mesh, true));
-    #endif // ENABLE_GENERIC_SUBPARTS_PLACEMENT
-            }
+        {
+            if (v->is_model_part())
+                m_raw_bounding_box.merge(v->mesh.transformed_bounding_box(inst_matrix * v->get_matrix()));
+        }
     }
 	return m_raw_bounding_box;
 }
@@ -920,22 +891,11 @@ const BoundingBoxf3& ModelObject::raw_bounding_box() const
 BoundingBoxf3 ModelObject::instance_bounding_box(size_t instance_idx, bool dont_translate) const
 {
     BoundingBoxf3 bb;
-#if ENABLE_GENERIC_SUBPARTS_PLACEMENT
     const Transform3d& inst_matrix = this->instances[instance_idx]->get_transformation().get_matrix(dont_translate);
-#endif // ENABLE_GENERIC_SUBPARTS_PLACEMENT
     for (ModelVolume *v : this->volumes)
     {
         if (v->is_model_part())
-        {
-#if ENABLE_GENERIC_SUBPARTS_PLACEMENT
             bb.merge(v->mesh.transformed_bounding_box(inst_matrix * v->get_matrix()));
-#else
-            // not maintained
-            assert(false);
-            //mesh.transform(v->get_matrix());
-            //bb.merge(this->instances[instance_idx]->transform_mesh_bounding_box(mesh, dont_translate));
-#endif // ENABLE_GENERIC_SUBPARTS_PLACEMENT
-        }
     }
     return bb;
 }
@@ -994,22 +954,11 @@ Polygon ModelObject::convex_hull_2d(const Transform3d &trafo_instance) const
     return hull;
 }
 
-#if ENABLE_VOLUMES_CENTERING_FIXES
 void ModelObject::center_around_origin(bool include_modifiers)
-#else
-void ModelObject::center_around_origin()
-#endif // ENABLE_VOLUMES_CENTERING_FIXES
 {
     // calculate the displacements needed to 
     // center this object around the origin
-#if ENABLE_VOLUMES_CENTERING_FIXES
     BoundingBoxf3 bb = include_modifiers ? full_raw_mesh_bounding_box() : raw_mesh_bounding_box();
-#else
-	BoundingBoxf3 bb;
-	for (ModelVolume *v : this->volumes)
-        if (v->is_model_part())
-            bb.merge(v->mesh.bounding_box());
-#endif // ENABLE_VOLUMES_CENTERING_FIXES
 
     // Shift is the vector from the center of the bounding box to the origin
     Vec3d shift = -bb.center();
@@ -1296,9 +1245,6 @@ void ModelObject::split(ModelObjectPtrs* new_objects)
         for (const ModelInstance *model_instance : this->instances)
             new_object->add_instance(*model_instance);
         ModelVolume* new_vol = new_object->add_volume(*volume, std::move(*mesh));
-#if !ENABLE_VOLUMES_CENTERING_FIXES
-        new_vol->center_geometry();
-#endif // !ENABLE_VOLUMES_CENTERING_FIXES
 
         for (ModelInstance* model_instance : new_object->instances)
         {
@@ -1318,6 +1264,58 @@ void ModelObject::repair()
 {
     for (ModelVolume *v : this->volumes)
         v->mesh.repair();
+}
+
+// Support for non-uniform scaling of instances. If an instance is rotated by angles, which are not multiples of ninety degrees,
+// then the scaling in world coordinate system is not representable by the Geometry::Transformation structure.
+// This situation is solved by baking in the instance transformation into the mesh vertices.
+// Rotation and mirroring is being baked in. In case the instance scaling was non-uniform, it is baked in as well.
+void ModelObject::bake_xy_rotation_into_meshes(size_t instance_idx)
+{
+    assert(instance_idx < this->instances.size());
+
+	const Geometry::Transformation reference_trafo = this->instances[instance_idx]->get_transformation();
+    if (Geometry::is_rotation_ninety_degrees(reference_trafo.get_rotation()))
+        // nothing to do, scaling in the world coordinate space is possible in the representation of Geometry::Transformation.
+        return;
+
+    bool   left_handed        = reference_trafo.is_left_handed();
+    bool   has_mirrorring     = ! reference_trafo.get_mirror().isApprox(Vec3d(1., 1., 1.));
+    bool   uniform_scaling    = std::abs(reference_trafo.get_scaling_factor().x() - reference_trafo.get_scaling_factor().y()) < EPSILON &&
+                                std::abs(reference_trafo.get_scaling_factor().x() - reference_trafo.get_scaling_factor().z()) < EPSILON;
+    double new_scaling_factor = uniform_scaling ? reference_trafo.get_scaling_factor().x() : 1.;
+
+    // Adjust the instances.
+    for (size_t i = 0; i < this->instances.size(); ++ i) {
+        ModelInstance &model_instance = *this->instances[i];
+        model_instance.set_rotation(Vec3d(0., 0., Geometry::rotation_diff_z(reference_trafo.get_rotation(), model_instance.get_rotation())));
+        model_instance.set_scaling_factor(Vec3d(new_scaling_factor, new_scaling_factor, new_scaling_factor));
+        model_instance.set_mirror(Vec3d(1., 1., 1.));
+    }
+
+    // Adjust the meshes.
+    // Transformation to be applied to the meshes.
+    Eigen::Matrix3d    mesh_trafo_3x3           = reference_trafo.get_matrix(true, false, uniform_scaling, ! has_mirrorring).matrix().block<3, 3>(0, 0);
+	Transform3d volume_offset_correction = this->instances[instance_idx]->get_transformation().get_matrix().inverse() * reference_trafo.get_matrix();
+    for (ModelVolume *model_volume : this->volumes) {
+        const Geometry::Transformation volume_trafo = model_volume->get_transformation();
+        bool   volume_left_handed        = volume_trafo.is_left_handed();
+        bool   volume_has_mirrorring     = ! volume_trafo.get_mirror().isApprox(Vec3d(1., 1., 1.));
+        bool   volume_uniform_scaling    = std::abs(volume_trafo.get_scaling_factor().x() - volume_trafo.get_scaling_factor().y()) < EPSILON &&
+                                           std::abs(volume_trafo.get_scaling_factor().x() - volume_trafo.get_scaling_factor().z()) < EPSILON;
+        double volume_new_scaling_factor = volume_uniform_scaling ? volume_trafo.get_scaling_factor().x() : 1.;
+        // Transform the mesh.
+		Matrix3d volume_trafo_3x3 = volume_trafo.get_matrix(true, false, volume_uniform_scaling, !volume_has_mirrorring).matrix().block<3, 3>(0, 0);
+		model_volume->transform_mesh(mesh_trafo_3x3 * volume_trafo_3x3, left_handed != volume_left_handed);
+        // Reset the rotation, scaling and mirroring.
+        model_volume->set_rotation(Vec3d(0., 0., 0.));
+        model_volume->set_scaling_factor(Vec3d(volume_new_scaling_factor, volume_new_scaling_factor, volume_new_scaling_factor));
+        model_volume->set_mirror(Vec3d(1., 1., 1.));
+        // Move the reference point of the volume to compensate for the change of the instance trafo.
+        model_volume->set_offset(volume_offset_correction * volume_trafo.get_offset());
+    }
+
+    this->invalidate_bounding_box();
 }
 
 double ModelObject::get_min_z() const
@@ -1456,7 +1454,8 @@ stl_stats ModelObject::get_object_stl_stats() const
     if (this->volumes.size() == 1)
         return this->volumes[0]->mesh.stl.stats;
 
-    stl_stats full_stats = this->volumes[0]->mesh.stl.stats;
+    stl_stats full_stats;
+    memset(&full_stats, 0, sizeof(stl_stats));
 
     // fill full_stats from all objet's meshes
     for (ModelVolume* volume : this->volumes)
@@ -1539,7 +1538,6 @@ bool ModelVolume::is_splittable() const
 
 void ModelVolume::center_geometry()
 {
-#if ENABLE_VOLUMES_CENTERING_FIXES
     Vec3d shift = mesh.bounding_box().center();
     if (!shift.isApprox(Vec3d::Zero()))
     {
@@ -1547,12 +1545,6 @@ void ModelVolume::center_geometry()
         m_convex_hull.translate(-(float)shift(0), -(float)shift(1), -(float)shift(2));
         translate(shift);
     }
-#else
-    Vec3d shift = -mesh.bounding_box().center();
-    mesh.translate((float)shift(0), (float)shift(1), (float)shift(2));
-    m_convex_hull.translate((float)shift(0), (float)shift(1), (float)shift(2));
-    translate(-shift);
-#endif // ENABLE_VOLUMES_CENTERING_FIXES
 }
 
 void ModelVolume::calculate_convex_hull()
@@ -1706,6 +1698,22 @@ void ModelVolume::scale_geometry(const Vec3d& versor)
 {
     mesh.scale(versor);
     m_convex_hull.scale(versor);
+}
+
+void ModelVolume::transform_mesh(const Transform3d &mesh_trafo, bool fix_left_handed)
+{
+    this->mesh.transform(mesh_trafo, fix_left_handed);
+    this->m_convex_hull.transform(mesh_trafo, fix_left_handed);
+    // Let the rest of the application know that the geometry changed, so the meshes have to be reloaded.
+    this->set_new_unique_id();
+}
+
+void ModelVolume::transform_mesh(const Matrix3d &matrix, bool fix_left_handed)
+{
+	this->mesh.transform(matrix, fix_left_handed);
+	this->m_convex_hull.transform(matrix, fix_left_handed);
+    // Let the rest of the application know that the geometry changed, so the meshes have to be reloaded.
+    this->set_new_unique_id();
 }
 
 void ModelInstance::transform_mesh(TriangleMesh* mesh, bool dont_translate) const

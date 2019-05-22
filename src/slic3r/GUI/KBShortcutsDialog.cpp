@@ -18,7 +18,7 @@ KBShortcutsDialog::KBShortcutsDialog()
 	auto main_sizer = new wxBoxSizer(wxVERTICAL);
 
     // logo
-    m_logo_bmp = ScalableBitmap(this, "Slic3r_32px.png", 32);
+    m_logo_bmp = ScalableBitmap(this, "PrusaSlicer_32px.png", 32);
 
     // fonts
     const wxFont& font = wxGetApp().normal_font();
@@ -46,7 +46,6 @@ KBShortcutsDialog::KBShortcutsDialog()
     main_grid_sizer->Add(r_sizer, 0);
 
     m_head_bitmaps.reserve(m_full_shortcuts.size());
-    const wxSize topic_size = wxSize(10 * wxGetApp().em_unit(), -1);
 
     for (auto& shortcut : m_full_shortcuts)
     {
@@ -59,7 +58,7 @@ KBShortcutsDialog::KBShortcutsDialog()
         hsizer->Add(m_head_bitmaps.back(), 0, wxEXPAND | wxLEFT | wxRIGHT, 15);
 
         // head
-        wxStaticText* head = new wxStaticText(panel, wxID_ANY, shortcut.first, wxDefaultPosition, topic_size);
+        wxStaticText* head = new wxStaticText(panel, wxID_ANY, shortcut.first);
         head->SetFont(head_font);
         hsizer->Add(head, 0, wxALIGN_CENTER_VERTICAL);
 
@@ -109,10 +108,10 @@ void KBShortcutsDialog::fill_shortcuts()
     main_shortcuts.push_back(Shortcut(ctrl+"S"          ,L("Save project (3MF)")));
     main_shortcuts.push_back(Shortcut(ctrl+alt+"L"      ,L("Load Config from .ini/amf/3mf/gcode and merge")));
     main_shortcuts.push_back(Shortcut(ctrl+"R"          ,L("(Re)slice")));
-    main_shortcuts.push_back(Shortcut(ctrl+"U"          ,L("Quick slice")));
-    main_shortcuts.push_back(Shortcut(ctrl+"Shift+U"    ,L("Repeat last quick slice")));
+//    main_shortcuts.push_back(Shortcut(ctrl+"U"          ,L("Quick slice")));
+//    main_shortcuts.push_back(Shortcut(ctrl+"Shift+U"    ,L("Repeat last quick slice")));
     main_shortcuts.push_back(Shortcut(ctrl+"1"          ,L("Select Plater Tab")));
-    main_shortcuts.push_back(Shortcut(ctrl+alt+"U"      ,L("Quick slice and Save as")));
+//    main_shortcuts.push_back(Shortcut(ctrl+alt+"U"      ,L("Quick slice and Save as")));
     main_shortcuts.push_back(Shortcut(ctrl+"2"          ,L("Select Print Settings Tab")));
     main_shortcuts.push_back(Shortcut(ctrl+"3"          ,L("Select Filament Settings Tab")));
     main_shortcuts.push_back(Shortcut(ctrl+"4"          ,L("Select Printer Settings Tab")));
@@ -120,9 +119,9 @@ void KBShortcutsDialog::fill_shortcuts()
     main_shortcuts.push_back(Shortcut(ctrl+"6"          ,L("Switch to Preview")));
     main_shortcuts.push_back(Shortcut(ctrl+"P"          ,L("Preferences")));
     main_shortcuts.push_back(Shortcut(ctrl+"J"          ,L("Print host upload queue")));
-    main_shortcuts.push_back(Shortcut("0-6"             ,L("Camera view ")));
-    main_shortcuts.push_back(Shortcut("+"               ,L("Add Instance to selected object ")));
-    main_shortcuts.push_back(Shortcut("-"               ,L("Remove Instance from selected object")));
+    main_shortcuts.push_back(Shortcut("0-6"             ,L("Camera view")));
+    main_shortcuts.push_back(Shortcut("+"               ,L("Add Instance of the selected object")));
+    main_shortcuts.push_back(Shortcut("-"               ,L("Remove Instance of the selected object")));
     main_shortcuts.push_back(Shortcut("?"               ,L("Show keyboard shortcuts list")));
     main_shortcuts.push_back(Shortcut(ctrl/*+"LeftMouse"*/,L("Press to select multiple object or move multiple object with mouse")));
 
@@ -144,14 +143,15 @@ void KBShortcutsDialog::fill_shortcuts()
     plater_shortcuts.push_back(Shortcut("C",        L("Gizmo cut")));
     plater_shortcuts.push_back(Shortcut("F",        L("Gizmo Place face on bed")));
     plater_shortcuts.push_back(Shortcut("L",        L("Gizmo SLA support points")));
-    plater_shortcuts.push_back(Shortcut("Shift+",   L("Press to snap by 5% in Gizmo scale\nor by 1mm in Gizmo move")));
-    plater_shortcuts.push_back(Shortcut(alt,        L("Press to scale or rotate selected objects\naround their own center")));
+    plater_shortcuts.push_back(Shortcut("Shift+",   L("Press to activate selection rectangle\nor to snap by 5% in Gizmo scale\nor to snap by 1mm in Gizmo move")));
+    plater_shortcuts.push_back(Shortcut(alt,        L("Press to activate deselection rectangle\nor to scale or rotate selected objects\naround their own center")));
+    plater_shortcuts.push_back(Shortcut(ctrl,       L("Press to activate one direction scaling in Gizmo scale")));
     plater_shortcuts.push_back(Shortcut("B",        L("Zoom to Bed")));
     plater_shortcuts.push_back(Shortcut("Z",        L("Zoom to all objects in scene, if none selected")));
     plater_shortcuts.push_back(Shortcut("Z",        L("Zoom to selected object")));
     plater_shortcuts.push_back(Shortcut("I",        L("Zoom in")));
     plater_shortcuts.push_back(Shortcut("O",        L("Zoom out")));
-    plater_shortcuts.push_back(Shortcut("ESC",      L("Unselect gizmo, keep object selection")));
+    plater_shortcuts.push_back(Shortcut("ESC",      L("Unselect gizmo / Clear selection")));
 
     m_full_shortcuts.push_back(std::make_pair(_(L("Plater Shortcuts")), std::make_pair(plater_shortcuts, szRight)));
 
@@ -211,7 +211,6 @@ void KBShortcutsDialog::on_dpi_changed(const wxRect &suggested_rect)
 void KBShortcutsDialog::onCloseDialog(wxEvent &)
 {
     this->EndModal(wxID_CLOSE);
-    this->Close();
 }
 
 } // namespace GUI

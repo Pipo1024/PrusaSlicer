@@ -114,7 +114,6 @@ class ObjectList : public wxDataViewCtrl
     ScalableBitmap	    m_bmp_support_blocker;
     ScalableBitmap	    m_bmp_manifold_warning;
     ScalableBitmap	    m_bmp_cog;
-    ScalableBitmap	    m_bmp_split;
 
     MenuWithSeparators  m_menu_object;
     MenuWithSeparators  m_menu_part;
@@ -173,7 +172,7 @@ public:
     void                update_extruder_values_for_items(const int max_extruder);
 
     void                init_icons();
-    void                rescale_icons();
+    void                msw_rescale_icons();
 
     // Get obj_idx and vol_idx values for the selected (by default) or an adjusted item
     void                get_selected_item_indexes(int& obj_idx, int& vol_idx, const wxDataViewItem& item = wxDataViewItem(0));
@@ -189,18 +188,20 @@ public:
 
     void                selection_changed();
     void                show_context_menu();
+#ifndef __WXOSX__
     void                key_event(wxKeyEvent& event);
+#endif /* __WXOSX__ */
 
     void                get_settings_choice(const wxString& category_name);
     void                get_freq_settings_choice(const wxString& bundle_name);
     void                update_settings_item();
 
-    void                append_menu_item_add_generic(wxMenuItem* menu, const ModelVolumeType type);
+    wxMenu*             append_submenu_add_generic(wxMenu* menu, const ModelVolumeType type);
     void                append_menu_items_add_volume(wxMenu* menu);
     wxMenuItem*         append_menu_item_split(wxMenu* menu);
     wxMenuItem*         append_menu_item_settings(wxMenu* menu);
     wxMenuItem*         append_menu_item_change_type(wxMenu* menu);
-    wxMenuItem*         append_menu_item_instance_to_object(wxMenu* menu);
+    wxMenuItem*         append_menu_item_instance_to_object(wxMenu* menu, wxWindow* parent);
     void                append_menu_items_osx(wxMenu* menu);
     wxMenuItem*         append_menu_item_fix_through_netfabb(wxMenu* menu);
     void                append_menu_item_export_stl(wxMenu* menu) const ;
@@ -299,7 +300,9 @@ public:
     void msw_rescale();
 
 private:
-    void OnChar(wxKeyEvent& event);
+#ifdef __WXOSX__
+//    void OnChar(wxKeyEvent& event);
+#endif /* __WXOSX__ */
     void OnContextMenu(wxDataViewEvent &event);
 
     void OnBeginDrag(wxDataViewEvent &event);

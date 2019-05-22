@@ -253,9 +253,7 @@ public:
 
     void set_from_transform(const Transform3d& transform);
 
-#if ENABLE_VOLUMES_CENTERING_FIXES
     void reset();
-#endif // ENABLE_VOLUMES_CENTERING_FIXES
 
     const Transform3d& get_matrix(bool dont_translate = false, bool dont_rotate = false, bool dont_scale = false, bool dont_mirror = false) const;
 
@@ -268,6 +266,21 @@ extern Eigen::Quaterniond rotation_xyz_diff(const Vec3d &rot_xyz_from, const Vec
 // Rotation by Z to align rot_xyz_from to rot_xyz_to.
 // This should only be called if it is known, that the two rotations only differ in rotation around the Z axis.
 extern double rotation_diff_z(const Vec3d &rot_xyz_from, const Vec3d &rot_xyz_to);
+
+// Is the angle close to a multiple of 90 degrees?
+inline bool is_rotation_ninety_degrees(double a)
+{
+    a = fmod(std::abs(a), 0.5 * M_PI);
+    if (a > 0.25 * PI)
+        a = 0.5 * PI - a;
+    return a < 0.001;
+}
+
+// Is the angle close to a multiple of 90 degrees?
+inline bool is_rotation_ninety_degrees(const Vec3d &rotation)
+{
+    return is_rotation_ninety_degrees(rotation.x()) && is_rotation_ninety_degrees(rotation.y()) && is_rotation_ninety_degrees(rotation.z());
+}
 
 } }
 

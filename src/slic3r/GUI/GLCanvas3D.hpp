@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <memory>
 
+#include "libslic3r/ModelArrange.hpp"
 #include "3DScene.hpp"
 #include "GLToolbar.hpp"
 #include "Event.hpp"
@@ -116,6 +117,7 @@ wxDECLARE_EVENT(EVT_GLCANVAS_INSTANCE_MOVED, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_WIPETOWER_MOVED, Vec3dEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_INSTANCE_ROTATED, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_INSTANCE_SCALED, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_WIPETOWER_ROTATED, Vec3dEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_ENABLE_ACTION_BUTTONS, Event<bool>);
 wxDECLARE_EVENT(EVT_GLCANVAS_UPDATE_GEOMETRY, Vec3dsEvent<2>);
 wxDECLARE_EVENT(EVT_GLCANVAS_MOUSE_DRAGGING_FINISHED, SimpleEvent);
@@ -344,6 +346,7 @@ class GLCanvas3D
         enum Warning {
             ObjectOutside,
             ToolpathOutside,
+            SlaSupportsOutside,
             SomethingNotShown,
             ObjectClashed
         };
@@ -552,6 +555,7 @@ public:
     void render();
 
     void select_all();
+    void deselect_all();
     void delete_selected();
     void ensure_on_bed(unsigned int object_idx);
 
@@ -606,6 +610,9 @@ public:
 
     int get_move_volume_id() const { return m_mouse.drag.move_volume_idx; }
     int get_first_hover_volume_idx() const { return m_hover_volume_idxs.empty() ? -1 : m_hover_volume_idxs.front(); }
+
+    arr::WipeTowerInfo get_wipe_tower_info() const;
+    void arrange_wipe_tower(const arr::WipeTowerInfo& wti) const;
 
     // Returns the view ray line, in world coordinate, at the given mouse position.
     Linef3 mouse_ray(const Point& mouse_pos);
@@ -695,13 +702,14 @@ private:
     // generates gcode unretractions geometry
     void _load_gcode_unretractions(const GCodePreviewData& preview_data);
     // generates objects and wipe tower geometry
-    void _load_shells_fff();
+    void _load_fff_shells();
     // generates objects geometry for sla
-    void _load_shells_sla();
+    void _load_sla_shells();
     // sets gcode geometry visibility according to user selection
     void _update_gcode_volumes_visibility(const GCodePreviewData& preview_data);
     void _update_toolpath_volumes_outside_state();
-    void _show_warning_texture_if_needed();
+    void _update_sla_shells_outside_state();
+    void _show_warning_texture_if_needed(WarningTexture::Warning warning);
 
     // generates the legend texture in dependence of the current shown view type
     void _generate_legend_texture(const GCodePreviewData& preview_data, const std::vector<float>& tool_colors);

@@ -103,9 +103,9 @@ public:
     void                    show_sliced_info_sizer(const bool show);
     void                    enable_buttons(bool enable);
     void                    set_btn_label(const ActionButtonType btn_type, const wxString& label) const;
-    void                    show_reslice(bool show) const;
-    void                    show_export(bool show) const;
-    void                    show_send(bool show) const;
+    bool                    show_reslice(bool show) const;
+	bool                    show_export(bool show) const;
+	bool                    show_send(bool show) const;
     bool                    is_multifilament();
     void                    update_mode();
 
@@ -134,6 +134,7 @@ public:
     const SLAPrint& sla_print() const;
     SLAPrint& sla_print();
 
+    void new_project();
     void load_project();
     void add_model();
     void extract_config_from_project();
@@ -151,6 +152,7 @@ public:
     void update_ui_from_settings();
 
     void select_all();
+    void deselect_all();
     void remove(size_t obj_idx);
     void reset();
     void reset_with_confirm();
@@ -182,7 +184,9 @@ public:
 
     void update_object_menu();
 
-    const wxString& get_project_filename() const;
+    wxString get_project_filename(const wxString& extension = wxEmptyString) const;
+    void set_project_filename(const wxString& filename);
+
     bool is_export_gcode_scheduled() const;
 
     int get_selected_object_idx();
@@ -200,6 +204,8 @@ public:
     bool can_delete_all() const;
     bool can_increase_instances() const;
     bool can_decrease_instances() const;
+    bool can_set_instance_to_object() const;
+    bool can_fix_through_netfabb() const;
     bool can_split_to_objects() const;
     bool can_split_to_volumes() const;
     bool can_arrange() const;

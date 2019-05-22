@@ -7,6 +7,7 @@
 #endif
 
 #include <memory>
+#include <cstdint>
 #include <functional>
 #include <boost/any.hpp>
 
@@ -225,6 +226,9 @@ public:
         m_em_unit = em_unit(m_parent);
     }
 
+    bool get_enter_pressed() const { return bEnterPressed; }
+    void set_enter_pressed(bool pressed) { bEnterPressed = pressed; }
+
 protected:
 	RevertButton*			m_Undo_btn = nullptr;
 	// Bitmap and Tooltip text for m_Undo_btn. The wxButton will be updated only if the new wxBitmap pointer differs from the currently rendered one.
@@ -328,9 +332,11 @@ public:
 
 class SpinCtrl : public Field {
 	using Field::Field;
+private:
+	static const int UNDEF_VALUE = INT_MIN;
 public:
-	SpinCtrl(const ConfigOptionDef& opt, const t_config_option_key& id) : Field(opt, id), tmp_value(-9999) {}
-	SpinCtrl(wxWindow* parent, const ConfigOptionDef& opt, const t_config_option_key& id) : Field(parent, opt, id), tmp_value(-9999) {}
+	SpinCtrl(const ConfigOptionDef& opt, const t_config_option_key& id) : Field(opt, id), tmp_value(UNDEF_VALUE) {}
+	SpinCtrl(wxWindow* parent, const ConfigOptionDef& opt, const t_config_option_key& id) : Field(parent, opt, id), tmp_value(UNDEF_VALUE) {}
 	~SpinCtrl() {}
 
 	int				tmp_value;
@@ -352,9 +358,10 @@ public:
 		dynamic_cast<wxSpinCtrl*>(window)->SetValue(tmp_value);
 		m_disable_change_event = false;
 	}
+
 	boost::any&		get_value() override {
-// 		return boost::any(tmp_value);
-		return m_value = tmp_value;
+		int value = static_cast<wxSpinCtrl*>(window)->GetValue();
+		return m_value = value;
 	}
 
     void            msw_rescale() override;
@@ -462,7 +469,7 @@ public:
 
 	void			set_value(const std::string& value, bool change_event = false) {
 		m_disable_change_event = !change_event;
-		dynamic_cast<wxStaticText*>(window)->SetLabel(value);
+		dynamic_cast<wxStaticText*>(window)->SetLabel(wxString::FromUTF8(value.data()));
 		m_disable_change_event = false;
 	}
 	void			set_value(const boost::any& value, bool change_event = false) {

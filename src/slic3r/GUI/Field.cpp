@@ -15,19 +15,31 @@ namespace Slic3r { namespace GUI {
 
 wxString double_to_string(double const value, const int max_precision /*= 4*/)
 {
-	if (value - int(value) == 0)
-		return wxString::Format(_T("%i"), int(value));
+// Style_NoTrailingZeroes does not work on OSX. It also does not work correctly with some locales on Windows.
+//	return wxNumberFormatter::ToString(value, max_precision, wxNumberFormatter::Style_NoTrailingZeroes);
 
-    int precision = max_precision;
-    for (size_t p = 1; p < max_precision; p++)
-	{
-		double cur_val = pow(10, p)*value;
-		if (cur_val - int(cur_val) == 0) {
-			precision = p;
-			break;
+	wxString s = wxNumberFormatter::ToString(value, max_precision, wxNumberFormatter::Style_None);
+
+	// The following code comes from wxNumberFormatter::RemoveTrailingZeroes(wxString& s)
+	// with the exception that here one sets the decimal separator explicitely to dot.
+    // If number is in scientific format, trailing zeroes belong to the exponent and cannot be removed.
+    if (s.find_first_of("eE") == wxString::npos) {
+	    const size_t posDecSep = s.find(".");
+	    // No decimal point => removing trailing zeroes irrelevant for integer number.
+	    if (posDecSep != wxString::npos) {
+		    // Find the last character to keep.
+		    size_t posLastNonZero = s.find_last_not_of("0");
+		    // If it's the decimal separator itself, don't keep it neither.
+		    if (posLastNonZero == posDecSep)
+		        -- posLastNonZero;
+		    s.erase(posLastNonZero + 1);
+		    // Remove sign from orphaned zero.
+		    if (s.compare("-0") == 0)
+		        s = "0";
 		}
 	}
-	return wxNumberFormatter::ToString(value, precision, wxNumberFormatter::Style_None);
+
+    return s;
 }
 
 void Field::PostInitialize()
@@ -215,7 +227,7 @@ void TextCtrl::BUILD() {
 	case coFloatOrPercent:
 	{
 		text_value = double_to_string(m_opt.default_value->getFloat());
-		if (static_cast<const ConfigOptionFloatOrPercent*>(m_opt.default_value)->percent)
+		if (m_opt.get_default_value<ConfigOptionFloatOrPercent>()->percent)
 			text_value += "%";
 		break;
 	}
@@ -230,19 +242,19 @@ void TextCtrl::BUILD() {
 	case coFloat:
 	{
 		double val = m_opt.type == coFloats ?
-			static_cast<const ConfigOptionFloats*>(m_opt.default_value)->get_at(m_opt_idx) :
+			m_opt.get_default_value<ConfigOptionFloats>()->get_at(m_opt_idx) :
 			m_opt.type == coFloat ? 
 				m_opt.default_value->getFloat() :
-				static_cast<const ConfigOptionPercents*>(m_opt.default_value)->get_at(m_opt_idx);
+				m_opt.get_default_value<ConfigOptionPercents>()->get_at(m_opt_idx);
 		text_value = double_to_string(val);
 		break;
 	}
 	case coString:			
-		text_value = static_cast<const ConfigOptionString*>(m_opt.default_value)->value;
+		text_value = m_opt.get_default_value<ConfigOptionString>()->value;
 		break;
 	case coStrings:
 	{
-		const ConfigOptionStrings *vec = static_cast<const ConfigOptionStrings*>(m_opt.default_value);
+		const ConfigOptionStrings *vec = m_opt.get_default_value<ConfigOptionStrings>();
 		if (vec == nullptr || vec->empty()) break; //for the case of empty default value
 		text_value = vec->get_at(m_opt_idx);
 		break;
@@ -272,8 +284,8 @@ void TextCtrl::BUILD() {
             e.Skip();
             temp->GetToolTip()->Enable(true);
 #endif // __WXGTK__
-            propagate_value();
             bEnterPressed = true;
+            propagate_value();
         }), temp->GetId());
     }
 
@@ -385,8 +397,8 @@ void CheckBox::BUILD() {
 
 	bool check_value =	m_opt.type == coBool ? 
 						m_opt.default_value->getBool() : m_opt.type == coBools ? 
-						static_cast<const ConfigOptionBools*>(m_opt.default_value)->get_at(m_opt_idx) : 
-    					false;
+							m_opt.get_default_value<ConfigOptionBools>()->get_at(m_opt_idx) : 
+    						false;
 
 	// Set Label as a string of at least one space simbol to correct system scaling of a CheckBox 
 	auto temp = new wxCheckBox(m_parent, wxID_ANY, wxString(" "), wxDefaultPosition, size); 
@@ -422,7 +434,6 @@ void CheckBox::msw_rescale()
     field->SetMinSize(wxSize(-1, int(1.5f*field->GetFont().GetPixelSize().y +0.5f)));
 }
 
-int undef_spin_val = -9999;		//! Probably, It's not necessary
 
 void SpinCtrl::BUILD() {
 	auto size = wxSize(wxDefaultSize);
@@ -439,7 +450,7 @@ void SpinCtrl::BUILD() {
 		break;
 	case coInts:
 	{
-		const ConfigOptionInts *vec = static_cast<const ConfigOptionInts*>(m_opt.default_value);
+		const ConfigOptionInts *vec = m_opt.get_default_value<ConfigOptionInts>();
 		if (vec == nullptr || vec->empty()) break;
 		for (size_t id = 0; id < vec->size(); ++id)
 		{
@@ -460,12 +471,14 @@ void SpinCtrl::BUILD() {
 	temp->SetFont(Slic3r::GUI::wxGetApp().normal_font());
 	temp->SetBackgroundStyle(wxBG_STYLE_PAINT);
 
-#ifndef __WXOSX__
-    // #ys_FIXME_KILL_FOCUS 
-    // wxEVT_KILL_FOCUS doesn't handled on OSX now (wxWidgets 3.1.1)
-    // So, we will update values on KILL_FOCUS & SPINCTRL events under MSW and GTK
-    // and on TEXT event under OSX
+// XXX: On OS X the wxSpinCtrl widget is made up of two subwidgets, unfortunatelly
+// the kill focus event is not propagated to the encompassing widget,
+// so we need to bind it on the inner text widget instead. (Ugh.)
+#ifdef __WXOSX__
+	temp->GetText()->Bind(wxEVT_KILL_FOCUS, ([this](wxEvent& e)
+#else
 	temp->Bind(wxEVT_KILL_FOCUS, ([this](wxEvent& e)
+#endif
 	{
         e.Skip();
         if (bEnterPressed) {
@@ -474,7 +487,7 @@ void SpinCtrl::BUILD() {
         }
 
         propagate_value();
-	}), temp->GetId());
+	}));
 
     temp->Bind(wxEVT_SPINCTRL, ([this](wxCommandEvent e) {  propagate_value();  }), temp->GetId()); 
     
@@ -484,7 +497,6 @@ void SpinCtrl::BUILD() {
         propagate_value();
         bEnterPressed = true;
     }), temp->GetId());
-#endif
 
 	temp->Bind(wxEVT_TEXT, ([this](wxCommandEvent e)
 	{
@@ -492,24 +504,23 @@ void SpinCtrl::BUILD() {
 // 		# when it was changed from the text control, so the on_change callback
 // 		# gets the old one, and on_kill_focus resets the control to the old value.
 // 		# As a workaround, we get the new value from $event->GetString and store
-// 		# here temporarily so that we can return it from $self->get_value
-		std::string value = e.GetString().utf8_str().data();
-        if (is_matched(value, "^\\-?\\d+$")) {
-            try {
-                tmp_value = std::stoi(value);
-            }
-            catch (const std::exception & /* e */) {
-                tmp_value = -9999;
-            }
-        }
-        else tmp_value = -9999;
-#ifdef __WXOSX__
-        propagate_value();
+// 		# here temporarily so that we can return it from get_value()
 
+		long value;
+		const bool parsed = e.GetString().ToLong(&value);
+		tmp_value = parsed && value >= INT_MIN && value <= INT_MAX ? (int)value : UNDEF_VALUE;
+
+#ifdef __WXOSX__
         // Forcibly set the input value for SpinControl, since the value 
-	    // inserted from the clipboard is not updated under OSX
-        if (tmp_value > -9999)
-            dynamic_cast<wxSpinCtrl*>(window)->SetValue(tmp_value);
+	    // inserted from the keyboard or clipboard is not updated under OSX
+        if (tmp_value != UNDEF_VALUE) {
+            wxSpinCtrl* spin = static_cast<wxSpinCtrl*>(window);
+            spin->SetValue(tmp_value);
+
+            // But in SetValue() is executed m_text_ctrl->SelectAll(), so
+            // discard this selection and set insertion point to the end of string
+            spin->GetText()->SetInsertionPointEnd();
+        }
 #endif
 	}), temp->GetId());
 	
@@ -521,10 +532,11 @@ void SpinCtrl::BUILD() {
 
 void SpinCtrl::propagate_value()
 {
-    if (tmp_value == -9999)
+    if (tmp_value == UNDEF_VALUE) {
         on_kill_focus();
-    else if (boost::any_cast<int>(m_value) != tmp_value)
+	} else {
         on_change_field();
+    }
 }
 
 void SpinCtrl::msw_rescale()
@@ -565,12 +577,15 @@ void Choice::BUILD() {
 	// recast as a wxWindow to fit the calling convention
 	window = dynamic_cast<wxWindow*>(temp);
 
-	if (m_opt.enum_labels.empty() && m_opt.enum_values.empty()) {
-	}
-	else{
-		for (auto el : m_opt.enum_labels.empty() ? m_opt.enum_values : m_opt.enum_labels) {
-			const wxString& str = _(el);//m_opt_id == "support" ? _(el) : el;
-			temp->Append(str);
+	if (! m_opt.enum_labels.empty() || ! m_opt.enum_values.empty()) {
+		if (m_opt.enum_labels.empty()) {
+			// Append non-localized enum_values
+			for (auto el : m_opt.enum_values)
+				temp->Append(el);
+		} else {
+			// Append localized enum_labels
+			for (auto el : m_opt.enum_labels)
+				temp->Append(_(el));
 		}
 		set_selection();
 	}
@@ -596,7 +611,11 @@ void Choice::BUILD() {
     if (m_is_editable) {
         temp->Bind(wxEVT_KILL_FOCUS, ([this](wxEvent& e) {
             e.Skip();
-            if (m_opt.type == coStrings) return;
+            if (m_opt.type == coStrings) {
+                on_change_field();
+                return;
+            }
+
             double old_val = !m_value.empty() ? boost::any_cast<double>(m_value) : -99999;
             if (is_defined_input_value<wxBitmapComboBox>(window, m_opt.type)) {
                 if (fabs(old_val - boost::any_cast<double>(get_value())) <= 0.0001)
@@ -641,7 +660,7 @@ void Choice::set_selection()
 		break;
 	}
 	case coEnum:{
-		int id_value = static_cast<const ConfigOptionEnum<SeamPosition>*>(m_opt.default_value)->value; //!!
+		int id_value = m_opt.get_default_value<ConfigOptionEnum<SeamPosition>>()->value; //!!
         field->SetSelection(id_value);
 		break;
 	}
@@ -661,7 +680,7 @@ void Choice::set_selection()
 		break;
 	}
 	case coStrings:{
-		text_value = static_cast<const ConfigOptionStrings*>(m_opt.default_value)->get_at(m_opt_idx);
+		text_value = m_opt.get_default_value<ConfigOptionStrings>()->get_at(m_opt_idx);
 
 		size_t idx = 0;
 		for (auto el : m_opt.enum_values)
@@ -834,7 +853,7 @@ boost::any& Choice::get_value()
     else if (m_opt.gui_type == "f_enum_open") {
         const int ret_enum = field->GetSelection();
         if (ret_enum < 0 || m_opt.enum_values.empty() || m_opt.type == coStrings ||
-            ret_str != m_opt.enum_values[ret_enum] && ret_str != m_opt.enum_labels[ret_enum] )
+            (ret_str != m_opt.enum_values[ret_enum] && ret_str != _(m_opt.enum_labels[ret_enum])))
 			// modifies ret_string!
             get_value_by_opt_type(ret_str);
         else 
@@ -870,15 +889,16 @@ void Choice::msw_rescale()
     // Set rescaled size
     field->SetSize(size);
 
-    size_t idx, counter = idx = 0;
-    if (m_opt.enum_labels.empty() && m_opt.enum_values.empty()) {}
-    else{
-        for (auto el : m_opt.enum_labels.empty() ? m_opt.enum_values : m_opt.enum_labels) {
-            const wxString& str = _(el);
-            field->Append(str);
-            if (el.compare(selection) == 0)
+    size_t idx = 0;
+    if (! m_opt.enum_labels.empty() || ! m_opt.enum_values.empty()) {
+    	size_t counter = 0;
+    	bool   labels = ! m_opt.enum_labels.empty();
+        for (const std::string &el : labels ? m_opt.enum_labels : m_opt.enum_values) {
+        	wxString text = labels ? _(el) : wxString::FromUTF8(el.c_str());
+            field->Append(text);
+            if (text == selection)
                 idx = counter;
-            ++counter;
+            ++ counter;
         }
     }
 
@@ -898,7 +918,7 @@ void ColourPicker::BUILD()
     if (m_opt.width >= 0) size.SetWidth(m_opt.width*m_em_unit);
 
 	// Validate the color
-	wxString clr_str(static_cast<const ConfigOptionStrings*>(m_opt.default_value)->get_at(m_opt_idx));
+	wxString clr_str(m_opt.get_default_value<ConfigOptionStrings>()->get_at(m_opt_idx));
 	wxColour clr(clr_str);
 	if (! clr.IsOk()) {
 		clr = wxTransparentColour;
@@ -932,7 +952,7 @@ void PointCtrl::BUILD()
 
     const wxSize field_size(4 * m_em_unit, -1);
 
-	auto default_pt = static_cast<const ConfigOptionPoints*>(m_opt.default_value)->values.at(0);
+	auto default_pt = m_opt.get_default_value<ConfigOptionPoints>()->values.at(0);
 	double val = default_pt(0);
 	wxString X = val - int(val) == 0 ? wxString::Format(_T("%i"), int(val)) : wxNumberFormatter::ToString(val, 2, wxNumberFormatter::Style_None);
 	val = default_pt(1);
@@ -1031,7 +1051,7 @@ void StaticText::BUILD()
     if (m_opt.height >= 0) size.SetHeight(m_opt.height*m_em_unit);
     if (m_opt.width >= 0) size.SetWidth(m_opt.width*m_em_unit);
 
-    const wxString legend(static_cast<const ConfigOptionString*>(m_opt.default_value)->value);
+    const wxString legend = wxString::FromUTF8(m_opt.get_default_value<ConfigOptionString>()->value.c_str());
     auto temp = new wxStaticText(m_parent, wxID_ANY, legend, wxDefaultPosition, size, wxST_ELLIPSIZE_MIDDLE);
 	temp->SetFont(Slic3r::GUI::wxGetApp().normal_font());
 	temp->SetBackgroundStyle(wxBG_STYLE_PAINT);
@@ -1055,6 +1075,7 @@ void StaticText::msw_rescale()
     {
         wxStaticText* field = dynamic_cast<wxStaticText*>(window);
         field->SetSize(size);
+        field->SetMinSize(size);
     }
 }
 
@@ -1066,7 +1087,7 @@ void SliderCtrl::BUILD()
 
 	auto temp = new wxBoxSizer(wxHORIZONTAL);
 
-	auto def_val = static_cast<const ConfigOptionInt*>(m_opt.default_value)->value;
+	auto def_val = m_opt.get_default_value<ConfigOptionInt>()->value;
 	auto min = m_opt.min == INT_MIN ? 0 : m_opt.min;
 	auto max = m_opt.max == INT_MAX ? 100 : m_opt.max;
 

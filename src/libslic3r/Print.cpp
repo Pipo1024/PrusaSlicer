@@ -1220,7 +1220,7 @@ std::string Print::validate() const
                 const SlicingParameters &slicing_params = object->slicing_parameters();
                 if (std::abs(slicing_params.first_print_layer_height - slicing_params0.first_print_layer_height) > EPSILON ||
                     std::abs(slicing_params.layer_height             - slicing_params0.layer_height            ) > EPSILON)
-                    return L("The Wipe Tower is only supported for multiple objects if they have equal layer heigths");
+                    return L("The Wipe Tower is only supported for multiple objects if they have equal layer heights");
                 if (slicing_params.raft_layers() != slicing_params0.raft_layers())
                     return L("The Wipe Tower is only supported for multiple objects if they are printed over an equal number of raft layers");
                 if (object->config().support_material_contact_distance != m_objects.front()->config().support_material_contact_distance)
@@ -1310,7 +1310,7 @@ std::string Print::validate() const
             }
             
             // validate first_layer_height
-            double first_layer_height = object->config().get_abs_value(L("first_layer_height"));
+            double first_layer_height = object->config().get_abs_value("first_layer_height");
             double first_layer_min_nozzle_diameter;
             if (object->config().raft_layers > 0) {
                 // if we have raft layers, only support material extruder is used on first layer
@@ -1514,13 +1514,14 @@ std::string Print::export_gcode(const std::string &path_template, GCodePreviewDa
     // output everything to a G-code file
     // The following call may die if the output_filename_format template substitution fails.
     std::string path = this->output_filepath(path_template);
-    std::string message = L("Exporting G-code");
-    // #ys_FIXME_localization
+    std::string message;
     if (! path.empty() && preview_data == nullptr) {
         // Only show the path if preview_data is not set -> running from command line.
+        message = L("Exporting G-code");
         message += " to ";
         message += path;
-    }
+    } else
+        message = L("Generating G-code");
     this->set_status(90, message);
 
     // The following line may die for multiple reasons.
@@ -1736,7 +1737,7 @@ void Print::_make_wipe_tower()
     // Check whether there are any layers in m_tool_ordering, which are marked with has_wipe_tower,
     // they print neither object, nor support. These layers are above the raft and below the object, and they
     // shall be added to the support layers to be printed.
-    // see https://github.com/prusa3d/Slic3r/issues/607
+    // see https://github.com/prusa3d/PrusaSlicer/issues/607
     {
         size_t idx_begin = size_t(-1);
         size_t idx_end   = m_wipe_tower_data.tool_ordering.layer_tools().size();
@@ -1874,12 +1875,12 @@ int Print::get_extruder(const ExtrusionEntityCollection& fill, const PrintRegion
 // Generate a recommended G-code output file name based on the format template, default extension, and template parameters
 // (timestamps, object placeholders derived from the model, current placeholder prameters and print statistics.
 // Use the final print statistics if available, or just keep the print statistics placeholders if not available yet (before G-code is finalized).
-std::string Print::output_filename() const 
+std::string Print::output_filename(const std::string &filename_base) const 
 { 
     // Set the placeholders for the data know first after the G-code export is finished.
     // These values will be just propagated into the output file name.
     DynamicConfig config = this->finished() ? this->print_statistics().config() : this->print_statistics().placeholders();
-    return this->PrintBase::output_filename(m_config.output_filename_format.value, "gcode", &config);
+    return this->PrintBase::output_filename(m_config.output_filename_format.value, ".gcode", filename_base, &config);
 }
 /*
 // Shorten the dhms time by removing the seconds, rounding the dhm to full minutes

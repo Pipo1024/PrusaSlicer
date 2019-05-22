@@ -92,12 +92,13 @@ void PrintHostSendDialog::EndModal(int ret)
         // Persist path and print settings
         wxString path = txt_filename->GetValue();
         int last_slash = path.Find('/', true);
-        if (last_slash != wxNOT_FOUND) {
+		if (last_slash == wxNOT_FOUND)
+			path.clear();
+		else
             path = path.SubString(0, last_slash);
-            wxGetApp().app_config->set("recent", CONFIG_KEY_PATH, into_u8(path));
-        }
-
-        GUI::get_app_config()->set("recent", CONFIG_KEY_PRINT, start_print() ? "1" : "0");
+		AppConfig *app_config = wxGetApp().app_config;
+		app_config->set("recent", CONFIG_KEY_PATH, into_u8(path));
+        app_config->set("recent", CONFIG_KEY_PRINT, start_print() ? "1" : "0");
     }
 
     MsgDialog::EndModal(ret);
@@ -145,12 +146,12 @@ PrintHostQueueDialog::PrintHostQueueDialog(wxWindow *parent)
 
     job_list = new wxDataViewListCtrl(this, wxID_ANY);
     // Note: Keep these in sync with Column
-    job_list->AppendTextColumn("ID", wxDATAVIEW_CELL_INERT);
-    job_list->AppendProgressColumn("Progress", wxDATAVIEW_CELL_INERT);
-    job_list->AppendTextColumn("Status", wxDATAVIEW_CELL_INERT);
-    job_list->AppendTextColumn("Host", wxDATAVIEW_CELL_INERT);
-    job_list->AppendTextColumn("Filename", wxDATAVIEW_CELL_INERT);
-    job_list->AppendTextColumn("error_message", wxDATAVIEW_CELL_INERT, -1, wxALIGN_CENTER, wxDATAVIEW_COL_HIDDEN);
+    job_list->AppendTextColumn(_(L("ID")), wxDATAVIEW_CELL_INERT);
+    job_list->AppendProgressColumn(_(L("Progress")), wxDATAVIEW_CELL_INERT);
+    job_list->AppendTextColumn(_(L("Status")), wxDATAVIEW_CELL_INERT);
+    job_list->AppendTextColumn(_(L("Host")), wxDATAVIEW_CELL_INERT);
+    job_list->AppendTextColumn(_(L("Filename")), wxDATAVIEW_CELL_INERT);
+    job_list->AppendTextColumn(_(L("Error Message")), wxDATAVIEW_CELL_INERT, -1, wxALIGN_CENTER, wxDATAVIEW_COL_HIDDEN);
 
     auto *btnsizer = new wxBoxSizer(wxHORIZONTAL);
     btn_cancel = new wxButton(this, wxID_DELETE, _(L("Cancel selected")));

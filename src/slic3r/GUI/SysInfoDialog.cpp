@@ -24,7 +24,7 @@ std::string get_main_info(bool format_as_html)
     if (!format_as_html)
         out << b_start << SLIC3R_APP_NAME << b_end << line_end;
     out << b_start << "Version:   "             << b_end << SLIC3R_VERSION << line_end;
-    out << b_start << "Build:     "             << b_end << SLIC3R_BUILD << line_end;
+    out << b_start << "Build:     "             << b_end << SLIC3R_BUILD_ID << line_end;
     out << line_end;
     out << b_start << "Operating System:    "   << b_end << wxPlatformInfo::Get().GetOperatingSystemFamilyName() << line_end;
     out << b_start << "System Architecture: "   << b_end << wxPlatformInfo::Get().GetArchName() << line_end;
@@ -54,7 +54,7 @@ SysInfoDialog::SysInfoDialog()
 	main_sizer->Add(hsizer, 1, wxEXPAND | wxALL, 10);
 
     // logo
-    m_logo_bmp = ScalableBitmap(this, "Slic3r_192px.png", 192);
+    m_logo_bmp = ScalableBitmap(this, "PrusaSlicer_192px.png", 192);
     m_logo = new wxStaticBitmap(this, wxID_ANY, m_logo_bmp.bmp());
 	hsizer->Add(m_logo, 0, wxALIGN_CENTER_VERTICAL);
     
@@ -117,7 +117,7 @@ SysInfoDialog::SysInfoDialog()
     }
     
     wxStdDialogButtonSizer* buttons = this->CreateStdDialogButtonSizer(wxOK);
-    m_btn_copy_to_clipboard = new wxButton(this, wxID_ANY, "Copy to Clipboard", wxDefaultPosition, wxDefaultSize);
+    m_btn_copy_to_clipboard = new wxButton(this, wxID_ANY, _(L("Copy to Clipboard")), wxDefaultPosition, wxDefaultSize);
 
     buttons->Insert(0, m_btn_copy_to_clipboard, 0, wxLEFT, 5);
     m_btn_copy_to_clipboard->Bind(wxEVT_BUTTON, &SysInfoDialog::onCopyToClipboard, this);
@@ -172,7 +172,6 @@ void SysInfoDialog::onCopyToClipboard(wxEvent &)
 void SysInfoDialog::onCloseDialog(wxEvent &)
 {
     this->EndModal(wxID_CLOSE);
-    this->Close();
 }
 
 } // namespace GUI

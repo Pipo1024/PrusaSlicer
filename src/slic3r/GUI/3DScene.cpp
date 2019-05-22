@@ -290,7 +290,12 @@ void GLVolume::set_render_color(const float* rgba, unsigned int size)
 void GLVolume::set_render_color()
 {
     if (force_native_color)
-        set_render_color(color, 4);
+    {
+        if (is_outside && shader_outside_printer_detection_enabled)
+            set_render_color(OUTSIDE_COLOR, 4);
+        else
+            set_render_color(color, 4);
+    }
     else {
         if (hover == HS_Select)
             set_render_color(HOVER_SELECT_COLOR, 4);
@@ -365,17 +370,16 @@ const BoundingBoxf3& GLVolume::transformed_bounding_box() const
 
 const BoundingBoxf3& GLVolume::transformed_convex_hull_bounding_box() const
 {
-    if (m_transformed_convex_hull_bounding_box_dirty)
-    {
-        if ((m_convex_hull != nullptr) && (m_convex_hull->stl.stats.number_of_facets > 0))
-            m_transformed_convex_hull_bounding_box = m_convex_hull->transformed_bounding_box(world_matrix());
-        else
-            m_transformed_convex_hull_bounding_box = bounding_box.transformed(world_matrix());
-
-        m_transformed_convex_hull_bounding_box_dirty = false;
-    }
-
+	if (m_transformed_convex_hull_bounding_box_dirty)
+		m_transformed_convex_hull_bounding_box = this->transformed_convex_hull_bounding_box(world_matrix());
     return m_transformed_convex_hull_bounding_box;
+}
+
+BoundingBoxf3 GLVolume::transformed_convex_hull_bounding_box(const Transform3d &trafo) const
+{
+	return (m_convex_hull != nullptr && m_convex_hull->stl.stats.number_of_facets > 0) ? 
+		m_convex_hull->transformed_bounding_box(trafo) :
+		bounding_box.transformed(trafo);
 }
 
 void GLVolume::set_range(double min_z, double max_z)
@@ -555,6 +559,9 @@ void GLVolume::render_legacy() const
         glFrontFace(GL_CCW);
 }
 
+bool GLVolume::is_sla_support() const { return this->composite_id.volume_id == -int(slaposSupportTree); }
+bool GLVolume::is_sla_pad() const { return this->composite_id.volume_id == -int(slaposBasePool); }
+
 std::vector<int> GLVolumeCollection::load_object(
     const ModelObject       *model_object,
     int                      obj_idx,
@@ -709,16 +716,18 @@ int GLVolumeCollection::load_wipe_tower_preview(
     brim_mesh.translate(-brim_width, -brim_width, 0.f);
     mesh.merge(brim_mesh);
 
-    mesh.rotate(rotation_angle, &origin_of_rotation); // rotates the box according to the config rotation setting
-
     this->volumes.emplace_back(new GLVolume(color));
     GLVolume &v = *this->volumes.back();
     v.indexed_vertex_array.load_mesh(mesh, use_VBOs);
     v.set_volume_offset(Vec3d(pos_x, pos_y, 0.0));
+    v.set_volume_rotation(Vec3d(0., 0., (M_PI/180.) * rotation_angle));
+
     // finalize_geometry() clears the vertex arrays, therefore the bounding box has to be computed before finalize_geometry().
     v.bounding_box = v.indexed_vertex_array.bounding_box();
     v.indexed_vertex_array.finalize_geometry(use_VBOs);
 	v.composite_id = GLVolume::CompositeID(obj_idx, 0, 0);
+    v.geometry_id.first = 0;
+    v.geometry_id.second = wipe_tower_instance_id().id;
     v.is_wipe_tower = true;
     v.shader_outside_printer_detection_enabled = ! size_unknown;
     return int(this->volumes.size() - 1);

@@ -79,6 +79,8 @@ void GLGizmoSlaSupports::set_sla_support_data(ModelObject* model_object, const S
             m_parent.toggle_model_objects_visibility(false);
             m_parent.toggle_model_objects_visibility(true, m_model_object, m_active_instance);
         }
+        else
+            m_parent.toggle_model_objects_visibility(true, nullptr, -1);
     }
 }
 
@@ -301,6 +303,9 @@ void GLGizmoSlaSupports::render_points(const Selection& selection, bool picking)
         glsafe(::glTranslated(support_point.pos(0), support_point.pos(1), support_point.pos(2)));
         glsafe(::glMultMatrixd(instance_scaling_matrix_inverse.data()));
 
+        if (vol->is_left_handed())
+            glFrontFace(GL_CW);
+
         // Matrices set, we can render the point mark now.
         // If in editing mode, we'll also render a cone pointing to the sphere.
         if (m_editing_mode) {
@@ -322,6 +327,9 @@ void GLGizmoSlaSupports::render_points(const Selection& selection, bool picking)
             glsafe(::glPopMatrix());
         }
         ::gluSphere(m_quadric, m_editing_mode_cache[i].support_point.head_front_radius * RenderPointScale, 24, 12);
+        if (vol->is_left_handed())
+            glFrontFace(GL_CCW);
+
         glsafe(::glPopMatrix());
     }
 
@@ -823,7 +831,7 @@ RENDER_AGAIN:
     m_imgui->set_next_window_bg_alpha(0.5f);
     m_imgui->begin(on_get_name(), ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse);
 
-    ImGui::PushItemWidth(m_imgui->scaled(5.55f));
+    //ImGui::PushItemWidth(m_imgui->scaled(5.55f));
 
     bool force_refresh = false;
     bool remove_selected = false;
@@ -835,9 +843,12 @@ RENDER_AGAIN:
         if (m_new_point_head_diameter > diameter_upper_cap)
             m_new_point_head_diameter = diameter_upper_cap;
 
-        m_imgui->text(_(L("Head diameter: ")));
-        ImGui::SameLine(m_imgui->scaled(6.66f));
-        ImGui::PushItemWidth(m_imgui->scaled(8.33f));
+        wxString text = _(L("Head diameter")) + ": ";
+        m_imgui->text(text);
+        float slider_left = m_imgui->calc_text_size(text).x + m_imgui->scaled(1.f);
+        ImGui::SameLine(/*m_imgui->scaled(6.66f)*/slider_left);
+        ImGui::PushItemWidth(/*m_imgui->scaled(8.33f)*/m_imgui->scaled(15.f) - slider_left);
+
         if (ImGui::SliderFloat("", &m_new_point_head_diameter, 0.1f, diameter_upper_cap, "%.1f")) {
             // value was changed
             for (auto& cache_entry : m_editing_mode_cache)
@@ -873,9 +884,12 @@ RENDER_AGAIN:
         }
     }
     else { // not in editing mode:
-        ImGui::PushItemWidth(m_imgui->scaled(5.55f));
-        m_imgui->text(_(L("Minimal points distance: ")));
-        ImGui::SameLine(m_imgui->scaled(9.44f));
+        wxString text1 = _(L("Minimal points distance")) + ": ";
+        wxString text2 = _(L("Support points density")) + ": ";
+        float sliders_left = std::max(m_imgui->calc_text_size(text1).x, m_imgui->calc_text_size(text2).x) + m_imgui->scaled(1.f);
+        m_imgui->text(text1);
+        ImGui::SameLine(/*m_imgui->scaled(9.44f)*/sliders_left);
+        ImGui::PushItemWidth(/*m_imgui->scaled(5.55f)*/m_imgui->scaled(15.f)-sliders_left);
 
         std::vector<const ConfigOption*> opts = get_config_options({"support_points_density_relative", "support_points_minimal_distance"});
         float density = static_cast<const ConfigOptionInt*>(opts[0])->value;
@@ -885,8 +899,9 @@ RENDER_AGAIN:
         if (value_changed)
             m_model_object->config.opt<ConfigOptionFloat>("support_points_minimal_distance", true)->value = minimal_point_distance;
 
-        m_imgui->text(_(L("Support points density: ")));
-        ImGui::SameLine(m_imgui->scaled(9.44f));
+        m_imgui->text(text2);
+        ImGui::SameLine(/*m_imgui->scaled(9.44f)*/sliders_left);
+
         if (ImGui::SliderFloat(" ", &density, 0.f, 200.f, "%.f %%")) {
             value_changed = true;
             m_model_object->config.opt<ConfigOptionInt>("support_points_density_relative", true)->value = (int)density;
@@ -922,18 +937,21 @@ RENDER_AGAIN:
 
     // Following is rendered in both editing and non-editing mode:
     m_imgui->text("");
+    wxString text1 = _(L("Clipping of view"))+ ": ";
+    wxString text2 = _(L("Reset direction"));
+    float slider_left = std::max(m_imgui->calc_text_size(text1).x, m_imgui->calc_text_size(text2).x) + m_imgui->scaled(1.5f);
     if (m_clipping_plane_distance == 0.f)
-        m_imgui->text(_(L("Clipping of view:"))+ " ");
+        m_imgui->text(text1);
     else {
-        if (m_imgui->button(_(L("Reset direction")))) {
+        if (m_imgui->button(text2)) {
             wxGetApp().CallAfter([this](){
                     reset_clipping_plane_normal();
                 });
         }
     }
 
-    ImGui::SameLine(m_imgui->scaled(6.66f));
-    ImGui::PushItemWidth(m_imgui->scaled(8.33f));
+    ImGui::SameLine(/*m_imgui->scaled(6.66f)*/slider_left);
+    ImGui::PushItemWidth(/*m_imgui->scaled(8.33f)*/m_imgui->scaled(15.f) - slider_left);
     ImGui::SliderFloat("  ", &m_clipping_plane_distance, 0.f, 1.f, "%.2f");
 
 
@@ -992,7 +1010,7 @@ bool GLGizmoSlaSupports::on_is_selectable() const
 
 std::string GLGizmoSlaSupports::on_get_name() const
 {
-    return L("SLA Support Points [L]");
+    return (_(L("SLA Support Points")) + " [L]").ToUTF8().data();
 }
 
 void GLGizmoSlaSupports::on_set_state()
@@ -1019,7 +1037,7 @@ void GLGizmoSlaSupports::on_set_state()
                 // on OSX with the wxMessageDialog being shown several times when clicked into.
                 if (m_model_object) {
                     if (m_unsaved_changes) {
-                        wxMessageDialog dlg(GUI::wxGetApp().mainframe, _(L("Do you want to save your manually edited support points ?\n")),
+                        wxMessageDialog dlg(GUI::wxGetApp().mainframe, _(L("Do you want to save your manually edited support points?")) + "\n",
                                             _(L("Save changes?")), wxICON_QUESTION | wxYES | wxNO);
                         if (dlg.ShowModal() == wxID_YES)
                             editing_mode_apply_changes();
@@ -1200,15 +1218,15 @@ SlaGizmoHelpDialog::SlaGizmoHelpDialog()
 : wxDialog(NULL, wxID_ANY, _(L("SLA gizmo keyboard shortcuts")), wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE|wxRESIZE_BORDER)
 {
     SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
-    const std::string &ctrl = GUI::shortkey_ctrl_prefix();
-    const std::string &alt  = GUI::shortkey_alt_prefix();
+    const wxString ctrl = GUI::shortkey_ctrl_prefix();
+    const wxString alt  = GUI::shortkey_alt_prefix();
 
 
     // fonts
     const wxFont& font = wxGetApp().small_font();
     const wxFont& bold_font = wxGetApp().bold_font();
 
-    auto note_text = new wxStaticText(this, wxID_ANY, "Note: some shortcuts work in (non)editing mode only.");
+    auto note_text = new wxStaticText(this, wxID_ANY, _(L("Note: some shortcuts work in (non)editing mode only.")));
     note_text->SetFont(font);
 
     auto vsizer    = new wxBoxSizer(wxVERTICAL);
@@ -1225,22 +1243,22 @@ SlaGizmoHelpDialog::SlaGizmoHelpDialog()
     vsizer->Add(gridsizer);
     vsizer->AddSpacer(20);
 
-    std::vector<std::pair<std::string, wxString>> shortcuts;
-    shortcuts.push_back(std::make_pair("Left click",        _(L("Add point"))));
-    shortcuts.push_back(std::make_pair("Right click",       _(L("Remove point"))));
-    shortcuts.push_back(std::make_pair("Drag",              _(L("Move point"))));
-    shortcuts.push_back(std::make_pair(ctrl+"Left click",   _(L("Add point to selection"))));
-    shortcuts.push_back(std::make_pair(alt+"Left click",    _(L("Remove point from selection"))));
-    shortcuts.push_back(std::make_pair("Shift+drag",        _(L("Select by rectangle"))));
-    shortcuts.push_back(std::make_pair(alt+"drag",          _(L("Deselect by rectangle"))));
-    shortcuts.push_back(std::make_pair(ctrl+"A",            _(L("Select all points"))));
-    shortcuts.push_back(std::make_pair("Delete",            _(L("Remove selected points"))));
-    shortcuts.push_back(std::make_pair(ctrl+"mouse wheel",  _(L("Move clipping plane"))));
-    shortcuts.push_back(std::make_pair("R",                 _(L("Reset clipping plane"))));
-    shortcuts.push_back(std::make_pair("Enter",             _(L("Apply changes"))));
-    shortcuts.push_back(std::make_pair("Esc",               _(L("Discard changes"))));
-    shortcuts.push_back(std::make_pair("M",                 _(L("Switch to editing mode"))));
-    shortcuts.push_back(std::make_pair("A",                 _(L("Auto-generate points"))));
+    std::vector<std::pair<wxString, wxString>> shortcuts;
+    shortcuts.push_back(std::make_pair(_(L("Left click")),          _(L("Add point"))));
+    shortcuts.push_back(std::make_pair(_(L("Right click")),         _(L("Remove point"))));
+    shortcuts.push_back(std::make_pair(_(L("Drag")),                _(L("Move point"))));
+    shortcuts.push_back(std::make_pair(ctrl+_(L("Left click")),     _(L("Add point to selection"))));
+    shortcuts.push_back(std::make_pair(alt+_(L("Left click")),      _(L("Remove point from selection"))));
+    shortcuts.push_back(std::make_pair(wxString("Shift+")+_(L("Drag")), _(L("Select by rectangle"))));
+    shortcuts.push_back(std::make_pair(alt+_(L("Drag")),            _(L("Deselect by rectangle"))));
+    shortcuts.push_back(std::make_pair(ctrl+"A",                    _(L("Select all points"))));
+    shortcuts.push_back(std::make_pair("Delete",                    _(L("Remove selected points"))));
+    shortcuts.push_back(std::make_pair(ctrl+_(L("Mouse wheel")),    _(L("Move clipping plane"))));
+    shortcuts.push_back(std::make_pair("R",                         _(L("Reset clipping plane"))));
+    shortcuts.push_back(std::make_pair("Enter",                     _(L("Apply changes"))));
+    shortcuts.push_back(std::make_pair("Esc",                       _(L("Discard changes"))));
+    shortcuts.push_back(std::make_pair("M",                         _(L("Switch to editing mode"))));
+    shortcuts.push_back(std::make_pair("A",                         _(L("Auto-generate points"))));
 
     for (const auto& pair : shortcuts) {
         auto shortcut = new wxStaticText(this, wxID_ANY, pair.first);

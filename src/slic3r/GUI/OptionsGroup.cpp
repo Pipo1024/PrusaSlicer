@@ -175,18 +175,21 @@ void OptionsGroup::append_line(const Line& line, wxStaticText**	full_Label/* = n
     // Build a label if we have it
 	wxStaticText* label=nullptr;
     if (label_width != 0) {
-		long label_style = staticbox ? 0 : wxALIGN_RIGHT;
+    	if (! line.near_label_widget || ! line.label.IsEmpty()) {
+    		// Only create the label if it is going to be displayed.
+			long label_style = staticbox ? 0 : wxALIGN_RIGHT;
 #ifdef __WXGTK__
-		// workaround for correct text align of the StaticBox on Linux
-		// flags wxALIGN_RIGHT and wxALIGN_CENTRE don't work when Ellipsize flags are _not_ given.
-		// Text is properly aligned only when Ellipsize is checked.
-		label_style |= staticbox ? 0 : wxST_ELLIPSIZE_END;
+			// workaround for correct text align of the StaticBox on Linux
+			// flags wxALIGN_RIGHT and wxALIGN_CENTRE don't work when Ellipsize flags are _not_ given.
+			// Text is properly aligned only when Ellipsize is checked.
+			label_style |= staticbox ? 0 : wxST_ELLIPSIZE_END;
 #endif /* __WXGTK__ */
-		label = new wxStaticText(this->ctrl_parent(), wxID_ANY, line.label + (line.label.IsEmpty() ? "" : ": "), 
-							wxDefaultPosition, wxSize(label_width*wxGetApp().em_unit(), -1), label_style);
-		label->SetBackgroundStyle(wxBG_STYLE_PAINT);
-        label->SetFont(wxGetApp().normal_font());
-        label->Wrap(label_width*wxGetApp().em_unit()); // avoid a Linux/GTK bug
+			label = new wxStaticText(this->ctrl_parent(), wxID_ANY, line.label + (line.label.IsEmpty() ? "" : ": "), 
+								wxDefaultPosition, wxSize(label_width*wxGetApp().em_unit(), -1), label_style);
+			label->SetBackgroundStyle(wxBG_STYLE_PAINT);
+	        label->SetFont(wxGetApp().normal_font());
+	        label->Wrap(label_width*wxGetApp().em_unit()); // avoid a Linux/GTK bug
+	    }
         if (!line.near_label_widget)
             grid_sizer->Add(label, 0, (staticbox ? 0 : wxALIGN_RIGHT | wxRIGHT) | wxALIGN_CENTER_VERTICAL, line.label.IsEmpty() ? 0 : 5);
         else {
@@ -203,7 +206,7 @@ void OptionsGroup::append_line(const Line& line, wxStaticText**	full_Label/* = n
                 sizer->Add(label, 0, (staticbox ? 0 : wxALIGN_RIGHT | wxRIGHT) | wxALIGN_CENTER_VERTICAL, 5);
             }
         }
-		if (line.label_tooltip.compare("") != 0)
+		if (label != nullptr && line.label_tooltip != "")
 			label->SetToolTip(line.label_tooltip);
     }
 
@@ -407,17 +410,17 @@ void ConfigOptionsGroup::back_to_config_value(const DynamicPrintConfig& config, 
 		auto   *nozzle_diameter = dynamic_cast<const ConfigOptionFloats*>(config.option("nozzle_diameter"));
 		value = int(nozzle_diameter->values.size());
 	}
-	else if (m_opt_map.find(opt_key) != m_opt_map.end())
+    else if (m_opt_map.find(opt_key) == m_opt_map.end() || opt_key == "bed_shape") {
+        value = get_config_value(config, opt_key);
+        change_opt_value(*m_config, opt_key, value);
+        return;
+    }
+	else
 	{
 		auto opt_id = m_opt_map.find(opt_key)->first;
 		std::string opt_short_key = m_opt_map.at(opt_id).first;
 		int opt_index = m_opt_map.at(opt_id).second;
 		value = get_config_value(config, opt_short_key, opt_index);
-	}
-	else{
-		value = get_config_value(config, opt_key);
-		change_opt_value(*m_config, opt_key, value);
-		return;
 	}
 
 	set_value(opt_key, value);
@@ -426,22 +429,24 @@ void ConfigOptionsGroup::back_to_config_value(const DynamicPrintConfig& config, 
 
 void ConfigOptionsGroup::on_kill_focus(const std::string& opt_key)
 {
-    if (m_fill_empty_value) {
+    if (m_fill_empty_value)
         m_fill_empty_value(opt_key);
-        return;
-    }
-    reload_config();
+    else
+	    reload_config();
 }
 
-void ConfigOptionsGroup::reload_config() {
-	for (t_opt_map::iterator it = m_opt_map.begin(); it != m_opt_map.end(); ++it) {
-		auto opt_id = it->first;
-		std::string opt_key = m_opt_map.at(opt_id).first;
-		int opt_index = m_opt_map.at(opt_id).second;
-		auto option = m_options.at(opt_id).opt;
-		set_value(opt_id, config_value(opt_key, opt_index, option.gui_flags.compare("serialized") == 0 ));
+void ConfigOptionsGroup::reload_config()
+{
+	for (auto &kvp : m_opt_map) {
+		// Name of the option field (name of the configuration key, possibly suffixed with '#' and the index of a scalar inside a vector.
+		const std::string &opt_id    = kvp.first;
+		// option key (may be scalar or vector)
+		const std::string &opt_key   = kvp.second.first;
+		// index in the vector option, zero for scalars
+		int 			   opt_index = kvp.second.second;
+		const ConfigOptionDef &option = m_options.at(opt_id).opt;
+		this->set_value(opt_id, config_value(opt_key, opt_index, option.gui_flags == "serialized"));
 	}
-
 }
 
 void ConfigOptionsGroup::Hide()
@@ -519,8 +524,7 @@ void ConfigOptionsGroup::msw_rescale()
             {
                 auto label = dynamic_cast<wxStaticText*>(label_item->GetWindow());
                 if (label != nullptr) {
-                    const int label_height = int(1.5f*label->GetFont().GetPixelSize().y + 0.5f);
-                    label->SetMinSize(wxSize(label_width*em, /*-1*/label_height));
+                    label->SetMinSize(wxSize(label_width*em, -1));
                 }
             }
             else if (label_item->IsSizer()) // case when we have near_label_widget
@@ -530,8 +534,7 @@ void ConfigOptionsGroup::msw_rescale()
                 {
                     auto label = dynamic_cast<wxStaticText*>(l_item->GetWindow());
                     if (label != nullptr) {
-                        const int label_height = int(1.5f*label->GetFont().GetPixelSize().y + 0.5f);
-                        label->SetMinSize(wxSize(label_width*em, /*-1*/label_height));
+                        label->SetMinSize(wxSize(label_width*em, -1));
                     }
                 }
             }

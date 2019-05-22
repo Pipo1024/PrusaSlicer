@@ -74,7 +74,7 @@ void ImGuiWrapper::set_language(const std::string &language)
         ranges = ImGui::GetIO().Fonts->GetGlyphRangesCyrillic();
     } else if (lang == "jp") {
         ranges = ImGui::GetIO().Fonts->GetGlyphRangesJapanese();
-    } else if (lang == "kr") {
+    } else if (lang == "ko") {
         ranges = ImGui::GetIO().Fonts->GetGlyphRangesKorean();
     } else if (lang == "zh") {
         ranges = ImGui::GetIO().Fonts->GetGlyphRangesChineseSimplifiedCommon();
@@ -186,7 +186,14 @@ void ImGuiWrapper::render()
 ImVec2 ImGuiWrapper::calc_text_size(const wxString &text)
 {
     auto text_utf8 = into_u8(text);
-    return ImGui::CalcTextSize(text_utf8.c_str());
+    ImVec2 size = ImGui::CalcTextSize(text_utf8.c_str());
+
+#ifndef __APPLE__
+    size.x *= m_style_scaling;
+    size.y *= m_style_scaling;
+#endif
+
+    return size;
 }
 
 void ImGuiWrapper::set_next_window_pos(float x, float y, int flag)

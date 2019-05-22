@@ -189,7 +189,7 @@ struct FirmwareDialog::priv
 
 	template<class ...Args> void queue_error(const wxString &format, Args... args) {
 		queue_message(format, args...);
-		queue_event(AE_STATUS, _(L("Flashing failed: ")) + wxString::Format(format, args...));
+		queue_event(AE_STATUS, _(L("Flashing failed")) +": "+ wxString::Format(format, args...));
 		avrdude->cancel();
 	}
 
@@ -723,10 +723,10 @@ void FirmwareDialog::priv::ensure_joined()
 const char* FirmwareDialog::priv::avr109_dev_name(Avr109Pid usb_pid) {
 	switch (usb_pid.boot) {
 		case USB_PID_MMU_BOOT:
-			return "Prusa MMU 2.0 Control";
+			return "Original Prusa MMU 2.0 Control";
 		break;
 		case USB_PID_CW1_BOOT:
-			return "Prusa CurWa";
+			return "Original Prusa CW1";
 		break;
 
 		default: throw std::runtime_error((boost::format("Invalid avr109 device USB PID: %1%") % usb_pid.boot).str());
@@ -765,6 +765,7 @@ FirmwareDialog::FirmwareDialog(wxWindow *parent) :
 	auto *label_hex_picker = new wxStaticText(panel, wxID_ANY, _(L("Firmware image:")));
 	p->hex_picker = new wxFilePickerCtrl(panel, wxID_ANY, wxEmptyString, wxFileSelectorPromptStr,
 		"Hex files (*.hex)|*.hex|All files|*.*");
+	p->hex_picker->GetPickerCtrl()->SetLabelText(_(L("Browse")));
 
 	auto *label_port_picker = new wxStaticText(panel, wxID_ANY, _(L("Serial port:")));
 	p->port_picker = new wxComboBox(panel, wxID_ANY);
