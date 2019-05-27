@@ -579,7 +579,12 @@ struct Pad {
         for(auto& bp : modelbase) basep.emplace_back(bp);
         
         if(pcfg.embed_object) {
-            create_base_pool(basep, tmesh, modelbase, cfg);
+            
+            auto modelbase_sticks = modelbase;
+            for(auto& poly : modelbase_sticks) 
+                sla::offset_with_breakstick_holes(poly, 0.5, 10, 0.3, 0.1);
+            
+            create_base_pool(basep, tmesh, modelbase_sticks, cfg);
         } else {
             create_base_pool(basep, tmesh, {}, cfg);
         }
