@@ -847,6 +847,19 @@ bool GLGizmosManager::on_char(wxKeyEvent& evt, GLCanvas3D& canvas)
                 
             break;
         }
+        case 'F':
+        case 'f':
+        {
+            if (m_current == Scale)
+            {
+                if (!is_dragging())
+                    wxGetApp().plater()->scale_selection_to_fit_print_volume();
+
+                processed = true;
+            }
+
+            break;
+        }
         }
     }
 

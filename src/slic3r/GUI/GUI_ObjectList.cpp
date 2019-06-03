@@ -1,3 +1,4 @@
+#include "libslic3r/libslic3r.h"
 #include "GUI_ObjectList.hpp"
 #include "GUI_ObjectManipulation.hpp"
 #include "GUI_App.hpp"
@@ -354,8 +355,8 @@ DynamicPrintConfig& ObjectList::get_item_config(const wxDataViewItem& item) cons
     const int vol_idx = type & itVolume ? m_objects_model->GetVolumeIdByItem(item) : -1;
 
     assert(obj_idx >= 0 || ((type & itVolume) && vol_idx >=0));
-    return type & itObject|itInstance ? (*m_objects)[obj_idx]->config :
-        (*m_objects)[obj_idx]->volumes[vol_idx]->config;
+    return type & itVolume ?(*m_objects)[obj_idx]->volumes[vol_idx]->config :
+                            (*m_objects)[obj_idx]->config;
 }
 
 wxDataViewColumn* ObjectList::create_objects_list_extruder_column(int extruders_count)
@@ -1283,6 +1284,12 @@ void ObjectList::append_menu_item_delete(wxMenu* menu)
         [this](wxCommandEvent&) { remove(); }, "", menu);
 }
 
+void ObjectList::append_menu_item_scale_selection_to_fit_print_volume(wxMenu* menu)
+{
+    append_menu_item(menu, wxID_ANY, _(L("Scale to print volume")), _(L("Scale the selected object to fit the print volume")),
+        [this](wxCommandEvent&) { wxGetApp().plater()->scale_selection_to_fit_print_volume(); }, "", menu);
+}
+
 void ObjectList::create_object_popupmenu(wxMenu *menu)
 {
 #ifdef __WXOSX__  
@@ -1291,6 +1298,7 @@ void ObjectList::create_object_popupmenu(wxMenu *menu)
 
     append_menu_item_export_stl(menu);
     append_menu_item_fix_through_netfabb(menu);
+    append_menu_item_scale_selection_to_fit_print_volume(menu);
 
     // Split object to parts
     m_menu_item_split = append_menu_item_split(menu);
@@ -2816,8 +2824,10 @@ void ObjectList::OnEditingDone(wxDataViewEvent &event)
     const auto renderer = dynamic_cast<BitmapTextRenderer*>(GetColumn(0)->GetRenderer());
 
     if (renderer->WasCanceled())
-        show_error(this, _(L("The supplied name is not valid;")) + "\n" +
-                         _(L("the following characters are not allowed:")) + " <>:/\\|?*\"");
+		wxTheApp->CallAfter([this]{
+			show_error(this, _(L("The supplied name is not valid;")) + "\n" +
+				             _(L("the following characters are not allowed:")) + " <>:/\\|?*\"");
+		});
 }
 
 void ObjectList::show_multi_selection_menu()
