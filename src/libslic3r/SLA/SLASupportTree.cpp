@@ -1535,13 +1535,8 @@ public:
                 m_support_nmls.row(fidx) = nn;
 
                 if (t.distance() > w) {
-                    if (!std::isinf(t.distance())) {
-                        double zdiff = t.position()(Z) - m_mesh.ground_level();
-                        
-                        if (zdiff < 0)
-                            BOOST_LOG_TRIVIAL(error)
-                                << "Faulty support with id " << fidx;
-                        
+                    // Check distance from ground, we might have zero elevation.
+                    if (hp(Z) + w * nn(Z) < m_result.ground_level) {
                         m_iheadless.emplace_back(fidx);
                     } else {
                         // mark the point for needing a head.
@@ -2096,9 +2091,11 @@ public:
             // This is only for checking
             double idist = bridge_mesh_intersect(sph, dir, R, true);
             double dist = ray_mesh_intersect(sj, dir);
+            if (std::isinf(dist)) dist = sph(Z) - m_result.ground_level;
 
-            if(std::isinf(idist) || std::isnan(idist) || idist < 2*R ||
-               std::isinf(dist)  || std::isnan(dist)   || dist < 2*R) {
+            if(std::isnan(idist) || idist < 2*R ||
+               std::isnan(dist)  || dist  < 2*R)
+            {
                 BOOST_LOG_TRIVIAL(warning) << "Can not find route for headless"
                                            << " support stick at: "
                                            << sj.transpose();
