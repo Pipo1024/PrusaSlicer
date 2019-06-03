@@ -1484,14 +1484,14 @@ public:
                                 std::cos(polar)).normalized();
 
                 // check available distance
-                double t = pinhead_mesh_intersect(
-                                  hp, // touching point
-                                  nn, // normal
-                                  pin_r,
-                                  m_cfg.head_back_radius_mm,
-                                  w);
+                EigenMesh3D::hit_result t
+                    = pinhead_mesh_intersect(hp, // touching point
+                                             nn, // normal
+                                             pin_r,
+                                             m_cfg.head_back_radius_mm,
+                                             w);
 
-                if(t <= w) {
+                if(t.distance() <= w) {
 
                     // Let's try to optimize this angle, there might be a
                     // viable normal that doesn't collide with the model
@@ -1534,12 +1534,22 @@ public:
                 // save the verified and corrected normal
                 m_support_nmls.row(fidx) = nn;
 
-                if(t > w) {
-                    // mark the point for needing a head.
-                    m_iheads.emplace_back(fidx);
-                } else if( polar >= 3*PI/4 ) {
-                    // Headless supports do not tilt like the headed ones so
-                    // the normal should point almost to the ground.
+                if (t.distance() > w) {
+                    if (!std::isinf(t.distance())) {
+                        double zdiff = t.position()(Z) - m_mesh.ground_level();
+                        
+                        if (zdiff < 0)
+                            BOOST_LOG_TRIVIAL(error)
+                                << "Faulty support with id " << fidx;
+                        
+                        m_iheadless.emplace_back(fidx);
+                    } else {
+                        // mark the point for needing a head.
+                        m_iheads.emplace_back(fidx);
+                    }
+                } else if (polar >= 3 * PI / 4) {
+                    // Headless supports do not tilt like the headed ones
+                    // so the normal should point almost to the ground.
                     m_iheadless.emplace_back(fidx);
                 }
             }

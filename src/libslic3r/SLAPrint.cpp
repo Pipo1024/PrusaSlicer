@@ -832,31 +832,36 @@ void SLAPrint::process()
             BOOST_LOG_TRIVIAL(debug) << "Automatic support points: "
                                      << po.m_supportdata->support_points.size();
 
-            // Using RELOAD_SLA_SUPPORT_POINTS to tell the Plater to pass the update status to GLGizmoSlaSupports
-            m_report_status(*this, -1, L("Generating support points"), SlicingStatus::RELOAD_SLA_SUPPORT_POINTS);
+            // Using RELOAD_SLA_SUPPORT_POINTS to tell the Plater to pass
+            // the update status to GLGizmoSlaSupports
+            m_report_status(*this,
+                            -1,
+                            L("Generating support points"),
+                            SlicingStatus::RELOAD_SLA_SUPPORT_POINTS);
         }
         else {
-            // There are either some points on the front-end, or the user removed them on purpose. No calculation will be done.
+            // There are either some points on the front-end, or the user
+            // removed them on purpose. No calculation will be done.
             po.m_supportdata->support_points = po.transformed_support_points();
         }
         
         // If the builtin pad mode is engaged, we have to filter out all the
         // points that are on the bottom of the object
         if(use_builtin_pad(po.m_config)) {
-            double gnd = po.m_supportdata->emesh.ground_level();
-            auto& pts = po.m_supportdata->support_points;
-            std::cout << "initial count " << pts.size() << std::endl;
-            auto endit = std::remove_if(pts.begin(), pts.end(), 
-                                        [&po, gnd](const sla::SupportPoint& sp) 
-            {
-                double diff = std::abs(gnd - double(sp.pos(Z)));
-                double pwt = po.m_config.pad_wall_thickness.getFloat();
-                return diff <= pwt;
-            });
+            double gnd   = po.m_supportdata->emesh.ground_level();
+            auto & pts   = po.m_supportdata->support_points;
             
+            // get iterator to the reorganized vector end
+            auto endit = std::remove_if(
+                pts.begin(),
+                pts.end(),
+                [&po, gnd](const sla::SupportPoint &sp) {
+                    double diff = std::abs(gnd - double(sp.pos(Z)));
+                    return diff <= po.m_config.pad_wall_thickness.getFloat();
+                });
+            
+            // erase all elements after the new end
             pts.erase(endit, pts.end());
-            
-            std::cout << "filtered count " << pts.size() << std::endl;
         }
     };
 
